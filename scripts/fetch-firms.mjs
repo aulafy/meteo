@@ -14,6 +14,22 @@ const countries = feature(world, world.objects.countries);
 const spain = countries.features.find((country) => String(country.id) === '724');
 if (!spain) throw new Error('No se pudo cargar la frontera de España');
 
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function fetchWithRetry(url, sensor, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await fetch(url, { headers: { 'User-Agent': 'METEO/1.0 (+https://github.com/aulafy/meteo)' }, signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status} — ${(await response.text()).slice(0, 120)}`);
+      return await response.text();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await delay(attempt * 1500);
+    }
+  }
+  throw new Error(`FIRMS ${sensor}: ${lastError instanceof Error ? lastError.message : 'fallo de red'}`);
+}
+
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
@@ -24,12 +40,18 @@ function parseCsv(text) {
   });
 }
 
-const results = await Promise.all(sensors.map(async (sensor) => {
+const settled = await Promise.allSettled(sensors.map(async (sensor) => {
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/${sensor}/${spainBounds}/1`;
-  const response = await fetch(url, { headers: { 'User-Agent': 'METEO/1.0 (+https://github.com/aulafy/meteo)' } });
-  if (!response.ok) throw new Error(`FIRMS ${sensor}: HTTP ${response.status} — ${(await response.text()).slice(0, 120)}`);
-  return parseCsv(await response.text()).map((row) => ({ ...row, sensor }));
+  return parseCsv(await fetchWithRetry(url, sensor)).map((row) => ({ ...row, sensor }));
 }));
+const successful = settled.filter((result) => result.status === 'fulfilled');
+const failures = settled.filter((result) => result.status === 'rejected');
+failures.forEach((result) => console.warn(result.reason instanceof Error ? result.reason.message : result.reason));
+if (!successful.length) {
+  console.warn('FIRMS no respondió: se conserva el último feed válido sin cambiar generatedAt.');
+  process.exit(0);
+}
+const results = successful.map((result) => result.value);
 
 const seen = new Set();
 const fires = results.flat().filter((row) => {
@@ -55,5 +77,5 @@ const fires = results.flat().filter((row) => {
 }).sort((a, b) => b.detectedAt.localeCompare(a.detectedAt));
 
 await mkdir('public', { recursive: true });
-await writeFile('public/fires.json', `${JSON.stringify({ generatedAt: new Date().toISOString(), country: 'ESP', source: 'NASA FIRMS', fires }, null, 2)}\n`);
-console.log(`FIRMS: ${fires.length} detecciones publicadas`);
+await writeFile('public/fires.json', `${JSON.stringify({ generatedAt: new Date().toISOString(), country: 'ESP', source: 'NASA FIRMS', sensorsAvailable: successful.length, sensorsExpected: sensors.length, fires }, null, 2)}\n`);
+console.log(`FIRMS: ${fires.length} detecciones publicadas desde ${successful.length}/${sensors.length} sensores`);
