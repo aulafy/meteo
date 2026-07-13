@@ -1,11 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, Search, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
+import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
 import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, rankFiresByDistance, searchSpanishLocations, windDirectionToCardinal } from './services';
+import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, Weather } from './types';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
+const emptyFeatureCollection = { type: 'FeatureCollection' as const, features: [] };
+const createRouteArrow = () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 48; canvas.height = 48;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  context.beginPath(); context.moveTo(24, 4); context.lineTo(40, 40); context.lineTo(24, 33); context.lineTo(8, 40); context.closePath();
+  context.fillStyle = '#2563eb'; context.fill(); context.lineWidth = 3; context.strokeStyle = '#ffffff'; context.stroke();
+  return context.getImageData(0, 0, 48, 48);
+};
 const decodeVapidKey = (value: string) => {
   const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
@@ -37,6 +48,15 @@ export default function App() {
   const [aiGuidance, setAiGuidance] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [showRouteImport, setShowRouteImport] = useState(false);
+  const [routeAcknowledged, setRouteAcknowledged] = useState(false);
+  const [routeError, setRouteError] = useState('');
+  const [referenceRoute, setReferenceRoute] = useState<ReferenceRoute | null>(null);
+  const [routeProgress, setRouteProgress] = useState(0);
+  const [routePlaying, setRoutePlaying] = useState(false);
+  const [routeSpeed, setRouteSpeed] = useState(60);
+  const [routeFollow, setRouteFollow] = useState(false);
+  const [routeTrail, setRouteTrail] = useState(true);
 
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
@@ -97,6 +117,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!routePlaying || !referenceRoute) return;
+    let animationFrame = 0;
+    let previousTime = performance.now();
+    const animate = (currentTime: number) => {
+      const elapsedSeconds = Math.min(0.25, (currentTime - previousTime) / 1000);
+      previousTime = currentTime;
+      setRouteProgress((current) => {
+        const next = current + (elapsedSeconds * routeSpeed) / referenceRoute.totalMeters;
+        if (next >= 1) { setRoutePlaying(false); return 1; }
+        return next;
+      });
+      animationFrame = window.requestAnimationFrame(animate);
+    };
+    animationFrame = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [routePlaying, routeSpeed, referenceRoute]);
+
+  useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: mapContainer.current,
@@ -108,6 +146,11 @@ export default function App() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
     map.on('load', () => {
+      map.addSource('reference-route', { type: 'geojson', data: emptyFeatureCollection });
+      map.addSource('reference-route-trail', { type: 'geojson', data: emptyFeatureCollection });
+      map.addSource('reference-route-marker', { type: 'geojson', data: emptyFeatureCollection });
+      map.addLayer({ id: 'reference-route-line', type: 'line', source: 'reference-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 4, 'line-opacity': 0.72, 'line-dasharray': [2, 1] } });
+      map.addLayer({ id: 'reference-route-trail-line', type: 'line', source: 'reference-route-trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#e7b84d', 'line-width': 5, 'line-opacity': 0.95 } });
       map.addSource('fires', { type: 'geojson', cluster: true, clusterMaxZoom: 10, clusterRadius: 45, data: { type: 'FeatureCollection', features: firesRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
       map.addLayer({ id: 'fire-clusters', type: 'circle', source: 'fires', filter: ['has', 'point_count'], paint: { 'circle-color': ['step', ['get', 'point_count'], '#f59a45', 10, '#ef5a31', 30, '#bd2f20'], 'circle-radius': ['step', ['get', 'point_count'], 17, 10, 23, 30, 29], 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } });
       map.addLayer({ id: 'fire-cluster-count', type: 'symbol', source: 'fires', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 }, paint: { 'text-color': '#fff' } });
@@ -116,6 +159,9 @@ export default function App() {
       map.addSource('user', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } } });
       map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: { 'circle-radius': 18, 'circle-color': '#147355', 'circle-opacity': 0.16 } });
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
+      const arrow = createRouteArrow();
+      if (arrow) map.addImage('meteo-route-arrow', arrow, { pixelRatio: 2 });
+      map.addLayer({ id: 'reference-route-marker-symbol', type: 'symbol', source: 'reference-route-marker', layout: { 'icon-image': 'meteo-route-arrow', 'icon-size': 0.65, 'icon-rotate': ['get', 'bearing'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
       map.on('click', 'fire-points', (e) => {
         const p = e.features?.[0]?.properties;
         if (p) {
@@ -153,6 +199,25 @@ export default function App() {
     if (!map?.isStyleLoaded()) return;
     (map.getSource('user') as GeoJSONSource)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } });
   }, [location]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    const routeSource = map.getSource('reference-route') as GeoJSONSource | undefined;
+    const trailSource = map.getSource('reference-route-trail') as GeoJSONSource | undefined;
+    const markerSource = map.getSource('reference-route-marker') as GeoJSONSource | undefined;
+    if (!referenceRoute) {
+      routeSource?.setData(emptyFeatureCollection);
+      trailSource?.setData(emptyFeatureCollection);
+      markerSource?.setData(emptyFeatureCollection);
+      return;
+    }
+    const sample = sampleRoute(referenceRoute, routeProgress);
+    routeSource?.setData(referenceRoute.geojson);
+    trailSource?.setData(routeTrail ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: sample.trail } } : emptyFeatureCollection);
+    markerSource?.setData({ type: 'Feature', properties: { bearing: sample.bearing }, geometry: { type: 'Point', coordinates: sample.coordinate } });
+    if (routeFollow && routePlaying) map.easeTo({ center: sample.coordinate, bearing: sample.bearing, duration: 0 });
+  }, [referenceRoute, routeProgress, routeTrail, routeFollow, routePlaying]);
 
   function locate() {
     if (!navigator.geolocation) { setToast('La geolocalización no está disponible'); return; }
@@ -241,6 +306,39 @@ export default function App() {
     setToast(`Consultando ${result.name}. Las alertas 24/7 siguen vinculadas al GPS del dispositivo.`); window.setTimeout(() => setToast(''), 4500);
   }
 
+  async function importReferenceRoute(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    setRouteError('');
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('El archivo supera el límite local de 5 MB');
+      const parsed = parseRouteText(await file.text(), file.name);
+      setReferenceRoute(parsed); setRouteProgress(0); setRoutePlaying(false); setShowRouteImport(false); setRouteAcknowledged(false);
+      mapRef.current?.fitBounds(parsed.bounds, { padding: 70, maxZoom: 15 });
+      setToast(`${parsed.format} cargado localmente · ${parsed.lines.length} trazado${parsed.lines.length === 1 ? '' : 's'} · no verificado`);
+      window.setTimeout(() => setToast(''), 4500);
+    } catch (error) {
+      setRouteError(error instanceof Error ? error.message : 'No se pudo leer la ruta');
+    } finally { input.value = ''; }
+  }
+
+  function toggleRoutePlayback() {
+    if (!referenceRoute) return;
+    if (!routePlaying && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setToast('La reproducción está desactivada por la preferencia de movimiento reducido. Puedes usar el control de progreso.');
+      window.setTimeout(() => setToast(''), 4500);
+      return;
+    }
+    if (!routePlaying && routeProgress >= 1) setRouteProgress(0);
+    setRoutePlaying((playing) => !playing);
+  }
+
+  function clearReferenceRoute() {
+    setReferenceRoute(null); setRoutePlaying(false); setRouteProgress(0); setRouteFollow(false);
+    setToast('Ruta local eliminada del mapa'); window.setTimeout(() => setToast(''), 3000);
+  }
+
   async function explainRisk() {
     setShowAi(true); setAiLoading(true); setAiGuidance('');
     try {
@@ -317,8 +415,9 @@ export default function App() {
         <div ref={mapContainer} className="map" />
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>}
-        <div className="map-tools"><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
-        <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span></div>
+        <div className="map-tools"><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
+        <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
+        {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local"><div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div><div className="route-playback"><button className="route-play" onClick={toggleRoutePlayback} aria-label={routePlaying ? 'Pausar animación' : 'Reproducir animación'}>{routePlaying ? <Pause/> : <Play/>}</button><label><span>Progreso <b>{Math.round(routeProgress * 100)}%</b></span><input aria-label="Progreso de la ruta" type="range" min="0" max="1" step="0.001" value={routeProgress} onChange={(event) => { setRoutePlaying(false); setRouteProgress(Number(event.target.value)); }}/></label></div><label className="route-speed"><span>Velocidad visual <b>{routeSpeed} m/s</b></span><input aria-label="Velocidad visual" type="range" min="10" max="500" step="10" value={routeSpeed} onChange={(event) => setRouteSpeed(Number(event.target.value))}/></label><div className="route-toggles"><label><input type="checkbox" checked={routeFollow} onChange={(event) => setRouteFollow(event.target.checked)}/> Seguir marcador</label><label><input type="checkbox" checked={routeTrail} onChange={(event) => setRouteTrail(event.target.checked)}/> Mostrar rastro</label></div><p>El archivo no se sube. Esta animación no valida carreteras, cortes ni seguridad.</p></section>}
         <div className="weather-strip"><div><Wind/><span><small>VIENTO</small><b>{weather.available ? `${weather.windSpeed.toFixed(0)} km/h · ${weather.windDirection.toFixed(0)}°` : '—'}</b></span></div><div><CloudRain/><span><small>HUMEDAD</small><b>{weather.available ? `${weather.humidity.toFixed(0)}%` : '—'}</b></span></div><div><Thermometer/><span><small>TEMPERATURA</small><b>{weather.available ? `${weather.temperature.toFixed(0)}°C` : '—'}</b></span></div><em>{weather.label}</em></div>
       </section>
     </main>
@@ -326,5 +425,6 @@ export default function App() {
     {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
     {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2>{registered ? 'Gestiona tus avisos' : 'Activa avisos de proximidad'}</h2><p>{remoteRegistered ? 'Los avisos remotos 24/7 están activos en este dispositivo.' : 'METEO registrará este dispositivo para comprobar cada 15 minutos si existe una detección de alta confianza en un radio de 25 km. Es un canal complementario y no sustituye ES‑Alert ni a las autoridades.'}</p>{!registered && <><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></>}{registered && <button className="primary" type="button" onClick={deactivateAlerts}>Desactivar y eliminar mi ubicación</button>}</form></div>}
     {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2>Explicación de seguridad</h2>{aiLoading ? <p>Analizando los datos visibles…</p> : <div className="ai-answer">{aiGuidance}</div>}<small>Groq · Apoyo informativo. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
+    {showRouteImport && <div className="modal-backdrop" onClick={() => setShowRouteImport(false)}><section className="modal route-import-modal" onClick={(event)=>event.stopPropagation()}><button type="button" className="modal-x" onClick={()=>setShowRouteImport(false)}><X/></button><div className="modal-icon"><Route/></div><h2>Cargar ruta de referencia</h2><p>Importa un GPX, KML o GeoJSON desde tu dispositivo. El archivo se procesa localmente y no modifica el nivel de riesgo ni tus alertas.</p><label className="consent"><input type="checkbox" checked={routeAcknowledged} onChange={(event)=>setRouteAcknowledged(event.target.checked)}/> Entiendo que METEO no ha verificado esta ruta y que no debo usarla como orden de evacuación.</label><label className={`route-file ${routeAcknowledged ? '' : 'disabled'}`}><Upload/> <span>{referenceRoute ? 'Sustituir ruta local' : 'Seleccionar GPX, KML o GeoJSON'}</span><input aria-label="Seleccionar archivo de ruta" disabled={!routeAcknowledged} type="file" accept=".gpx,.kml,.geojson,.json,application/geo+json,application/gpx+xml,application/vnd.google-earth.kml+xml" onChange={importReferenceRoute}/></label>{routeError && <p className="route-error" role="alert">{routeError}</p>}<small>Máximo 5 MB y 20.000 puntos. Solo rutas dentro de España.</small></section></div>}
   </div>;
 }

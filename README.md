@@ -23,6 +23,10 @@ El mapa conserva las detecciones del feed como contexto, pero el riesgo personal
 
 METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambos bajo MIT, el patrón de consulta y normalización de Open‑Meteo para pronóstico horario y calidad del aire. Se adaptó al contexto de incendios: muestra viento, rachas, humedad y partículas durante las próximas 12 horas, sin incorporar el paisaje 3D ni elementos meteorológicos que distraigan durante una emergencia.
 
+## Rutas locales y GeoLibre
+
+La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
+
 ## Función de Groq
 
 El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente en una explicación breve: situación, acciones inmediatas y datos desconocidos. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
