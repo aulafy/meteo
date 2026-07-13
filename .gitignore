@@ -7,4 +7,4 @@ vite.config.d.ts
 .env.*
 !.env.example
 .DS_Store
-
+work/

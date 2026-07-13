@@ -30,7 +30,8 @@ export default function App() {
   useEffect(() => { getWeather(location).then(setWeather); }, [location]);
 
   useEffect(() => {
-    fetch('./fires.json', { cache: 'no-store' }).then(async (response) => {
+    const firesUrl = import.meta.env.VITE_FIRES_URL || 'https://aulafy.github.io/meteo/fires.json';
+    fetch(firesUrl, { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error('FIRMS no disponible');
       const data = await response.json() as { generatedAt: string; fires: Fire[] };
       setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt));
@@ -116,7 +117,7 @@ export default function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>FUEGO SEGURO</b><span>Vigilancia y evacuación</span></div></div>
+      <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>METEO</b><span>Alertas y rutas seguras</span></div></div>
       <div className="live"><span /> {fireMode === 'live' ? 'NASA FIRMS EN VIVO' : 'MODO DEMO'}</div>
       <nav><button className="nav-link active">Mapa</button><button className="nav-link">Alertas</button><button className="nav-link">Preparación</button></nav>
       <div className="top-actions"><button className="icon-button" aria-label="Notificaciones"><Bell size={19}/><i>2</i></button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mi cuenta' : 'Registrarme'}</span></button><button className="mobile-menu" onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>

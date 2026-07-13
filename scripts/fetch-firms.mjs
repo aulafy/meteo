@@ -19,7 +19,7 @@ function parseCsv(text) {
 
 const results = await Promise.all(sensors.map(async (sensor) => {
   const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/${sensor}/${spainBounds}/1`;
-  const response = await fetch(url, { headers: { 'User-Agent': 'Fuego-Seguro/1.0' } });
+  const response = await fetch(url, { headers: { 'User-Agent': 'METEO/1.0 (+https://github.com/aulafy/meteo)' } });
   if (!response.ok) throw new Error(`FIRMS ${sensor}: HTTP ${response.status} — ${(await response.text()).slice(0, 120)}`);
   return parseCsv(await response.text()).map((row) => ({ ...row, sensor }));
 }));
