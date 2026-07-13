@@ -15,9 +15,11 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 
 - Meteorología actual, pronóstico horario y calidad del aire: Open-Meteo.
 - Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
+- Contexto europeo: Copernicus EFFIS mediante su WMS oficial, con índice meteorológico FWI diario y áreas quemadas NRT de la temporada. Estas capas no confirman una emergencia local ni representan un perímetro operativo.
+- Tráfico: incidencias oficiales DGT DATEX II v3.7, normalizadas en el servidor.
 - Cartografía: OpenFreeMap/MapLibre.
 
-El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
+El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. La consulta y el filtro geográfico cubren península, Baleares, Canarias, Ceuta y Melilla. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
 
 ## Integración con MeteoFlow
 
@@ -28,6 +30,10 @@ METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambo
 La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
 
 El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento y exportación GeoJSON sin el GPS del residente. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
+
+## Copernicus EFFIS
+
+Las capas «Peligro meteorológico EFFIS» y «Áreas quemadas EFFIS» se consumen directamente del [WMS oficial](https://maps.effis.emergency.copernicus.eu/effis) y permanecen desactivadas por defecto. El FWI es un índice meteorológico modelado; la cartografía NRT representa daño/huella quemada y no el frente activo. EFFIS reutiliza detecciones FIRMS para sus focos activos, por lo que METEO no los duplica. Consulta la [integración y sus límites](docs/effis-integration.md).
 
 ## Tráfico oficial DGT
 
@@ -43,15 +49,15 @@ El proyecto está preparado para Vercel mediante `vercel.json`. Las detecciones 
 
 ### Web Push remoto
 
-El directorio `api/` contiene funciones Vercel para suscribir dispositivos y evaluar alertas. Aplica `supabase/migrations/001_push_alerts.sql` en un proyecto Supabase con PostGIS y configura las variables de `.env.example` en Vercel. Genera las claves mediante `npx web-push generate-vapid-keys`.
+El directorio `api/` contiene funciones Vercel para suscribir dispositivos y evaluar alertas. Aplica en orden `supabase/migrations/001_push_alerts.sql` y `supabase/migrations/002_fire_observations.sql` en un proyecto Supabase con PostGIS y configura las variables de `.env.example` en Vercel. Genera las claves mediante `npx web-push generate-vapid-keys`.
 
-El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Solo envía detecciones FIRMS con confianza mínima del 70%, observadas durante las últimas 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
+El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Ingiere y audita FIRMS en PostGIS. La función SQL `pending_alert_candidates` selecciona mediante `ST_DWithin` la observación más próxima a cada dispositivo, con confianza mínima del 70%, una antigüedad máxima de 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
 
-La persona puede desactivar los avisos desde la propia app; esto elimina la suscripción y su ubicación. Como límite adicional, el evaluador elimina automáticamente suscripciones que lleven 180 días sin renovarse y registros de entrega con más de 365 días.
+La persona puede desactivar los avisos desde la propia app; esto elimina la suscripción y su ubicación. Como límite adicional, el evaluador elimina automáticamente suscripciones que lleven 180 días sin renovarse, observaciones con más de 30 días, auditorías de ingesta con más de 90 días y entregas con más de 365 días. La [documentación de backend](docs/supabase-backend.md) detalla el modelo de seguridad y el orden de despliegue.
 
 ## Arquitectura de producción recomendada
 
-El cliente nunca debería decidir por sí solo una evacuación real. Un backend debe ingerir NASA FIRMS y fuentes oficiales regionales, normalizar focos en PostGIS, calcular corredores con una red vial y polígonos de propagación, y enviar notificaciones mediante Web Push/SMS. Cualquier futura ruta debe identificarse siempre como recomendación complementaria a Protección Civil y 112.
+El cliente nunca decide por sí solo una evacuación real. El backend ya ingiere FIRMS, normaliza observaciones en PostGIS y calcula proximidad para Web Push. La siguiente fase de producción requiere fuentes operativas de perímetros, carreteras y refugios proporcionadas por autoridades antes de calcular cualquier corredor. Cualquier futura ruta debe identificarse siempre como recomendación complementaria a Protección Civil y 112.
 
 ## Aviso
 

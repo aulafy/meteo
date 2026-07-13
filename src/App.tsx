@@ -5,6 +5,7 @@ import { SPAIN_CENTER } from './data';
 import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
 import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
+import { buildEffisBurnedAreaTileUrl, buildEffisFwiImageUrl, buildEffisLegendUrl, EFFIS_ATTRIBUTION, EFFIS_SPAIN_IMAGE_COORDINATES, EFFIS_VIEWER_URL } from './effis';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
@@ -77,6 +78,8 @@ export default function App() {
   const [satelliteEnabled, setSatelliteEnabled] = useState(false);
   const [windLayerEnabled, setWindLayerEnabled] = useState(true);
   const [dgtLayerEnabled, setDgtLayerEnabled] = useState(true);
+  const [effisFwiEnabled, setEffisFwiEnabled] = useState(false);
+  const [effisBurnedEnabled, setEffisBurnedEnabled] = useState(false);
   const [fireTimeWindow, setFireTimeWindow] = useState<FireTimeWindow>(24);
   const [routeElevation, setRouteElevation] = useState<ElevationProfile | null>(null);
   const [routeElevationLoading, setRouteElevationLoading] = useState(false);
@@ -206,6 +209,10 @@ export default function App() {
       map.addLayer({ id: 'meteo-hillshade', type: 'hillshade', source: 'meteo-terrain', layout: { visibility: 'none' }, paint: { 'hillshade-exaggeration': 0.35, 'hillshade-shadow-color': '#503c28', 'hillshade-highlight-color': '#f3ead2', 'hillshade-accent-color': '#876f53' } }, firstSymbolLayer);
       map.addSource('meteo-satellite', { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: 19, attribution: 'Imagen: Esri, Maxar, Earthstar Geographics y colaboradores' });
       map.addLayer({ id: 'meteo-satellite', type: 'raster', source: 'meteo-satellite', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.92, 'raster-saturation': -0.1, 'raster-contrast': 0.08 } }, firstSymbolLayer);
+      map.addSource('effis-fwi', { type: 'image', url: buildEffisFwiImageUrl(), coordinates: EFFIS_SPAIN_IMAGE_COORDINATES });
+      map.addLayer({ id: 'effis-fwi', type: 'raster', source: 'effis-fwi', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.5, 'raster-fade-duration': 0 } }, firstSymbolLayer);
+      map.addSource('effis-burned-areas', { type: 'raster', tiles: [buildEffisBurnedAreaTileUrl()], tileSize: 256, maxzoom: 14, attribution: EFFIS_ATTRIBUTION });
+      map.addLayer({ id: 'effis-burned-areas', type: 'raster', source: 'effis-burned-areas', layout: { visibility: 'none' }, paint: { 'raster-opacity': 0.72, 'raster-fade-duration': 0 } }, firstSymbolLayer);
       map.addSource('reference-route', { type: 'geojson', data: emptyFeatureCollection });
       map.addSource('reference-route-trail', { type: 'geojson', data: emptyFeatureCollection });
       map.addSource('reference-route-marker', { type: 'geojson', data: emptyFeatureCollection });
@@ -309,6 +316,18 @@ export default function App() {
     if (!map?.getLayer('meteo-satellite')) return;
     map.setLayoutProperty('meteo-satellite', 'visibility', satelliteEnabled ? 'visible' : 'none');
   }, [satelliteEnabled]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer('effis-fwi')) return;
+    map.setLayoutProperty('effis-fwi', 'visibility', effisFwiEnabled ? 'visible' : 'none');
+  }, [effisFwiEnabled]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer('effis-burned-areas')) return;
+    map.setLayoutProperty('effis-burned-areas', 'visibility', effisBurnedEnabled ? 'visible' : 'none');
+  }, [effisBurnedEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -488,8 +507,10 @@ export default function App() {
         fireWindowHours: fireTimeWindow,
         firesVisible: visibleFires.length,
         dgtIncidentsVisible: dgtLayerEnabled ? trafficIncidents.length : 0,
+        effisFwiVisible: effisFwiEnabled,
+        effisBurnedAreasVisible: effisBurnedEnabled,
         includesPreciseUserLocation: false,
-        warning: 'Las detecciones satelitales no confirman incendios y las rutas locales no están verificadas.',
+        warning: 'FIRMS no confirma incendios. EFFIS aporta contexto modelado y áreas quemadas, no órdenes ni rutas. Las rutas locales no están verificadas.',
       },
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/geo+json' }));
@@ -572,7 +593,7 @@ export default function App() {
           <div className="section-title"><div><h2>Información para residentes</h2><span>Según tu proximidad y las condiciones</span></div><ShieldCheck size={20}/></div>
           <div className="resident-grid"><div><small>Distancia</small><b>{hasSelectedLocation && Number.isFinite(risk.distanceKm) ? `${risk.distanceKm.toFixed(1)} km` : 'Elige ubicación'}</b></div><div><small>Aire (AQI UE)</small><b>{airQuality ? airQuality.europeanAqi.toFixed(0) : 'Sin datos'}</b></div><div><small>Partículas PM2.5</small><b>{airQuality ? `${airQuality.pm25.toFixed(0)} µg/m³` : 'Sin datos'}</b></div><div><small>Próxima revisión</small><b>≤ 15 min</b></div></div>
           <div className="resident-advice"><b>Prepárate antes de recibir una orden</b><ul><li>Móvil cargado, documentación, medicación, agua y llaves.</li><li>Localiza a menores, mayores, dependientes y animales.</li><li>Cierra ventanas si hay humo y evita ejercicio exterior.</li><li>No bloquees carreteras ni vayas a observar el incendio.</li></ul></div>
-          <div className="official-links"><a href="tel:112">Llamar al 112</a><a href="https://www.aemet.es/es/eltiempo/prediccion/avisos" target="_blank" rel="noreferrer">Avisos AEMET</a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/" target="_blank" rel="noreferrer">Tráfico DGT</a><a href="https://www.proteccioncivil.es/" target="_blank" rel="noreferrer">Protección Civil</a></div>
+          <div className="official-links"><a href="tel:112">Llamar al 112</a><a href="https://www.aemet.es/es/eltiempo/prediccion/avisos" target="_blank" rel="noreferrer">Avisos AEMET</a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/" target="_blank" rel="noreferrer">Tráfico DGT</a><a href={EFFIS_VIEWER_URL} target="_blank" rel="noreferrer">Copernicus EFFIS</a><a href="https://www.proteccioncivil.es/" target="_blank" rel="noreferrer">Protección Civil</a></div>
           <div className="advisory"><ShieldCheck size={16}/><span>METEO no dibuja rutas reales sin perímetros, carreteras cortadas y refugios confirmados por las autoridades.</span></div>
         </section>
 
@@ -592,8 +613,21 @@ export default function App() {
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>}
         <div className="map-tools"><button className={showMapLayers ? 'active' : ''} aria-expanded={showMapLayers} onClick={() => setShowMapLayers((visible) => !visible)} title="Capas y análisis GeoLibre" aria-label="Capas y análisis GeoLibre"><Layers/></button><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
-        {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa"><div className="map-layer-heading"><div><b>Capas y análisis</b><small>Patrones GeoLibre · MapLibre</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div><label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label><label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label><div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones · {trafficIncidents.length} afecciones DGT</div><button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button><p>El filtro temporal, el relieve y la imagen no cambian el riesgo. Los datos DGT informan de afecciones; no generan una ruta de evacuación.</p></section>}
-        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
+        {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa">
+          <div className="map-layer-heading"><div><b>Capas y análisis</b><small>GeoLibre · MapLibre · fuentes oficiales</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div>
+          <label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Peligro meteorológico EFFIS</b><small>Índice FWI diario modelado · no es un incendio</small></span><input type="checkbox" checked={effisFwiEnabled} onChange={(event) => setEffisFwiEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Áreas quemadas EFFIS</b><small>Cartografía NRT de la temporada · no es un perímetro activo</small></span><input type="checkbox" checked={effisBurnedEnabled} onChange={(event) => setEffisBurnedEnabled(event.target.checked)}/></label>
+          {(effisFwiEnabled || effisBurnedEnabled) && <div className="effis-layer-context"><img src={buildEffisLegendUrl(effisFwiEnabled ? 'fwi' : 'burned-areas')} alt={effisFwiEnabled ? 'Leyenda del índice de peligro FWI de EFFIS' : 'Leyenda de áreas quemadas EFFIS'}/><span><b>Copernicus EFFIS</b><small>Contexto europeo oficial. No confirma una emergencia local, una carretera ni una ruta.</small></span></div>}
+          <label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label>
+          <label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label>
+          <div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones · {trafficIncidents.length} afecciones DGT</div>
+          <button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button>
+          <p>EFFIS y FIRMS son capas distintas: EFFIS añade peligro meteorológico y huella quemada; no genera órdenes ni rutas. La IA no interpreta estos píxeles.</p>
+        </section>}
+        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span>{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
         {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local">
           <div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div>
           <div className="route-playback"><button className="route-play" onClick={toggleRoutePlayback} aria-label={routePlaying ? 'Pausar animación' : 'Reproducir animación'}>{routePlaying ? <Pause/> : <Play/>}</button><label><span>Progreso <b>{Math.round(routeProgress * 100)}%</b></span><input aria-label="Progreso de la ruta" type="range" min="0" max="1" step="0.001" value={routeProgress} onChange={(event) => { setRoutePlaying(false); setRouteProgress(Number(event.target.value)); }}/></label></div>

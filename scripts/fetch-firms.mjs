@@ -2,13 +2,13 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import { point } from '@turf/helpers';
 import { feature } from 'topojson-client';
-import world from 'world-atlas/countries-50m.json' with { type: 'json' };
+import world from 'world-atlas/countries-10m.json' with { type: 'json' };
 
 const key = process.env.FIRMS_MAP_KEY;
 if (!key) throw new Error('Falta FIRMS_MAP_KEY');
 
 const sensors = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
-const spainBounds = '-10,35,5,44';
+const spainBounds = '-19,27,5,44.5';
 const confidenceScore = { l: 35, n: 70, h: 95 };
 const countries = feature(world, world.objects.countries);
 const spain = countries.features.find((country) => String(country.id) === '724');

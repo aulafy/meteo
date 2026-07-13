@@ -8,8 +8,8 @@ const subscriptionSchema = z.object({
     expirationTime: z.number().nullable().optional(),
     keys: z.object({ p256dh: z.string().min(20).max(256), auth: z.string().min(8).max(128) }),
   }),
-  latitude: z.number().min(35).max(44),
-  longitude: z.number().min(-10).max(5),
+  latitude: z.number().min(27).max(44.5),
+  longitude: z.number().min(-19).max(5),
   radiusKm: z.number().min(5).max(100).default(25),
   consentVersion: z.literal('2026-07-13'),
 });
