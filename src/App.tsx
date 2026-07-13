@@ -248,9 +248,9 @@ export default function App() {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           riskLevel: risk.level, riskScore: risk.score,
-          distanceKm: Number.isFinite(risk.distanceKm) ? risk.distanceKm : null,
-          confidence: risk.nearestFire?.confidence ?? null, frp: risk.nearestFire?.frp ?? null,
-          weather: { available: weather.available, temperature: weather.temperature, humidity: weather.humidity, windSpeed: weather.windSpeed, windDirection: weather.windDirection },
+          distanceKm: Number.isFinite(risk.distanceKm) ? Number(risk.distanceKm.toFixed(1)) : null,
+          confidence: risk.nearestFire?.confidence ?? null, frp: risk.nearestFire?.frp != null ? Number(risk.nearestFire.frp.toFixed(1)) : null,
+          weather: { available: weather.available, temperature: Number(weather.temperature.toFixed(1)), humidity: Number(weather.humidity.toFixed(0)), windSpeed: Number(weather.windSpeed.toFixed(0)), windDirection: Number(weather.windDirection.toFixed(0)) },
           reasons: risk.reasons,
         }),
       });
