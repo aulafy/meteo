@@ -15,7 +15,7 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 
 - Meteorología actual: Open-Meteo, con fallback local.
 - Rutas: servidor público OSRM, con fallback a línea directa.
-- Focos: datos de demostración listos para sustituirse por NASA FIRMS. FIRMS requiere `MAP_KEY`; en producción debe consultarse desde un backend para no exponer la clave.
+- Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
 - Cartografía: OpenFreeMap/MapLibre.
 
 ## Arquitectura de producción recomendada
@@ -25,3 +25,5 @@ El cliente nunca debería decidir por sí solo una evacuación real. Un backend 
 ## Aviso
 
 Este MVP es demostrativo y no sustituye las instrucciones de emergencias. Para desplegarlo hacen falta validación con autoridades, pruebas de carga, auditoría de privacidad/consentimiento, retención mínima de ubicaciones y redundancia de proveedores.
+
+Las detecciones FIRMS son puntos térmicos observados por satélite, no incendios confirmados ni perímetros operativos. Pueden llegar con retraso debido a la órbita, nubosidad o procesamiento y deben contrastarse con 112, Protección Civil y los servicios autonómicos.

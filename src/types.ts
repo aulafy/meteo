@@ -6,6 +6,7 @@ export interface Fire {
   name: string;
   confidence: number;
   intensity: number;
+  frp?: number;
   detectedAt: string;
   source: 'NASA FIRMS' | 'Demo';
 }
@@ -32,7 +33,7 @@ export type RiskLevel = 'bajo' | 'moderado' | 'alto' | 'extremo';
 export interface RiskAssessment {
   score: number;
   level: RiskLevel;
-  nearestFire: Fire;
+  nearestFire?: Fire;
   distanceKm: number;
   reasons: string[];
   etaMinutes: number;
