@@ -27,6 +27,8 @@ METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambo
 
 La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
 
+El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento y exportación GeoJSON sin el GPS del residente. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
+
 ## Función de Groq
 
 El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente en una explicación breve: situación, acciones inmediatas y datos desconocidos. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
