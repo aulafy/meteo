@@ -48,6 +48,13 @@ export function assessRisk(location: Coordinates, fires: Fire[], weather: Weathe
   return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: Math.max(5, Math.round(nearest.km * 2.6)) };
 }
 
+export function rankFiresByDistance(location: Coordinates, fires: Fire[]) {
+  return fires.map((fire) => ({
+    fire,
+    distanceKm: distance(point(location), point(fire.coordinates), { units: 'kilometers' }),
+  })).sort((a, b) => a.distanceKm - b.distanceKm);
+}
+
 export function getDownwindLocation(fire: Coordinates, windFromDegrees: number, distanceKm = 5): Coordinates {
   const radiusKm = 6371;
   const angularDistance = distanceKm / radiusKm;
