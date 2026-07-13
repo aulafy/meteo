@@ -48,6 +48,17 @@ export function assessRisk(location: Coordinates, fires: Fire[], weather: Weathe
   return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: Math.max(5, Math.round(nearest.km * 2.6)) };
 }
 
+export function getDownwindLocation(fire: Coordinates, windFromDegrees: number, distanceKm = 5): Coordinates {
+  const radiusKm = 6371;
+  const angularDistance = distanceKm / radiusKm;
+  const bearingRadians = ((windFromDegrees + 180) % 360) * Math.PI / 180;
+  const latitude = fire[1] * Math.PI / 180;
+  const longitude = fire[0] * Math.PI / 180;
+  const destinationLatitude = Math.asin(Math.sin(latitude) * Math.cos(angularDistance) + Math.cos(latitude) * Math.sin(angularDistance) * Math.cos(bearingRadians));
+  const destinationLongitude = longitude + Math.atan2(Math.sin(bearingRadians) * Math.sin(angularDistance) * Math.cos(latitude), Math.cos(angularDistance) - Math.sin(latitude) * Math.sin(destinationLatitude));
+  return [destinationLongitude * 180 / Math.PI, destinationLatitude * 180 / Math.PI];
+}
+
 export function chooseSafePlace(location: Coordinates, fires: Fire[], places: SafePlace[]): SafePlace {
   return places.map((place) => {
     const userDistance = distance(point(location), point(place.coordinates), { units: 'kilometers' });

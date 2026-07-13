@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { Bell, ChevronRight, CloudRain, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
+import { AlertTriangle, Bell, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, TestTube2, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { DEMO_CENTER, demoFires, safePlaces } from './data';
-import { assessRisk, chooseSafePlace, getRoute, getWeather } from './services';
+import { assessRisk, chooseSafePlace, getDownwindLocation, getRoute, getWeather } from './services';
 import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
@@ -24,6 +24,7 @@ export default function App() {
   const [fires, setFires] = useState<Fire[]>(demoFires);
   const [fireMode, setFireMode] = useState<'live' | 'demo'>('demo');
   const firesRef = useRef<Fire[]>(demoFires);
+  const [simulatedScenario, setSimulatedScenario] = useState(false);
 
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
 
@@ -113,9 +114,20 @@ export default function App() {
     if (!navigator.geolocation) { setToast('La geolocalización no está disponible'); return; }
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       const next: Coordinates = [coords.longitude, coords.latitude];
-      setLocation(next); mapRef.current?.flyTo({ center: next, zoom: 12 });
+      setSimulatedScenario(false); setLocation(next); mapRef.current?.flyTo({ center: next, zoom: 12 });
       setToast('Ubicación actualizada'); window.setTimeout(() => setToast(''), 2500);
     }, () => { setToast('Usamos la ubicación de demostración. Revisa el permiso del navegador.'); window.setTimeout(() => setToast(''), 4000); });
+  }
+
+  async function simulateFiveKmScenario() {
+    const fire = [...fires].filter((item) => item.confidence >= 70).sort((a, b) => (b.frp ?? 0) - (a.frp ?? 0))[0];
+    if (!fire) { setToast('No hay una detección adecuada para el ensayo'); return; }
+    const fireWeather = await getWeather(fire.coordinates);
+    const resident = getDownwindLocation(fire.coordinates, fireWeather.windDirection, 5);
+    setSimulatedScenario(true); setWeather(fireWeather); setLocation(resident);
+    mapRef.current?.flyTo({ center: resident, zoom: 11.5 });
+    setToast('Ensayo activo: residente simulado a 5 km y a sotavento');
+    window.setTimeout(() => setToast(''), 4500);
   }
 
   const riskColor = risk.level === 'extremo' ? '#b92e20' : risk.level === 'alto' ? '#d95424' : risk.level === 'moderado' ? '#d89918' : '#147355';
@@ -132,10 +144,13 @@ export default function App() {
       <aside className={`side-panel ${mobilePanel ? 'open' : ''}`}>
         <button className="panel-close" onClick={() => setMobilePanel(false)}><X/></button>
         <section className="status-card" style={{'--risk': riskColor} as React.CSSProperties}>
-          <div className="eyebrow"><Radio size={14}/> NIVEL DE RIESGO ACTUAL</div>
+          <div className="eyebrow"><Radio size={14}/> {simulatedScenario ? 'ENSAYO DE SEGURIDAD · NO ES TU UBICACIÓN' : 'NIVEL DE RIESGO ACTUAL'}</div>
           <div className="risk-heading"><div><strong>{risk.level}</strong><span>Índice {risk.score}/100</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${Math.min(180, risk.score * 1.8)}deg)` }}/></div></div>
-          <p>Condiciones favorables para la propagación. Mantente atento a las indicaciones oficiales.</p>
+          <p>{risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
+          <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
+          {risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
+          {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
         <section className="panel-section">
@@ -157,6 +172,7 @@ export default function App() {
           <div><span className="share-icon"><MapPin size={18}/></span><div><b>Compartir mi ubicación</b><small>Para recibir alertas cercanas</small></div></div>
           <label className="switch"><input type="checkbox" checked={sharing} onChange={(e)=>setSharing(e.target.checked)}/><span/></label>
         </section>
+        <button className="scenario-button" onClick={simulateFiveKmScenario}><TestTube2 size={17}/><span><b>Probar alerta a 5 km</b><small>Ensayo con un foco FIRMS real</small></span></button>
       </aside>
 
       <section className="map-wrap">
