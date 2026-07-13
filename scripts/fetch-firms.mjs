@@ -4,6 +4,7 @@ const key = process.env.FIRMS_MAP_KEY;
 if (!key) throw new Error('Falta FIRMS_MAP_KEY');
 
 const sensors = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
+const spainBounds = '-10,35,5,44';
 const confidenceScore = { l: 35, n: 70, h: 95 };
 
 function parseCsv(text) {
@@ -17,9 +18,9 @@ function parseCsv(text) {
 }
 
 const results = await Promise.all(sensors.map(async (sensor) => {
-  const url = `https://firms.modaps.eosdis.nasa.gov/api/country/csv/${key}/${sensor}/ESP/1`;
+  const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/${sensor}/${spainBounds}/1`;
   const response = await fetch(url, { headers: { 'User-Agent': 'Fuego-Seguro/1.0' } });
-  if (!response.ok) throw new Error(`FIRMS ${sensor}: HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`FIRMS ${sensor}: HTTP ${response.status} — ${(await response.text()).slice(0, 120)}`);
   return parseCsv(await response.text()).map((row) => ({ ...row, sensor }));
 }));
 
