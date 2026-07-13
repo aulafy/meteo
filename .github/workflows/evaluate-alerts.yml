@@ -1,0 +1,26 @@
+name: Evaluate wildfire alerts
+
+on:
+  schedule:
+    - cron: '4,19,34,49 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wildfire-alert-evaluator
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate nearby-fire push alerts
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl --fail-with-body --show-error --silent \
+            --retry 3 --retry-all-errors --max-time 120 \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            https://meteo-neon-eight.vercel.app/api/cron/evaluate-alerts

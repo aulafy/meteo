@@ -5,6 +5,8 @@ vite.config.js
 vite.config.d.ts
 .env
 .env.*
-!.env.example
 .DS_Store
 work/
+.vercel
+.env*
+!.env.example
