@@ -1,4 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
+import { point } from '@turf/helpers';
+import { feature } from 'topojson-client';
+import world from 'world-atlas/countries-50m.json' with { type: 'json' };
 
 const key = process.env.FIRMS_MAP_KEY;
 if (!key) throw new Error('Falta FIRMS_MAP_KEY');
@@ -6,6 +10,9 @@ if (!key) throw new Error('Falta FIRMS_MAP_KEY');
 const sensors = ['VIIRS_NOAA20_NRT', 'VIIRS_NOAA21_NRT', 'VIIRS_SNPP_NRT'];
 const spainBounds = '-10,35,5,44';
 const confidenceScore = { l: 35, n: 70, h: 95 };
+const countries = feature(world, world.objects.countries);
+const spain = countries.features.find((country) => String(country.id) === '724');
+if (!spain) throw new Error('No se pudo cargar la frontera de España');
 
 function parseCsv(text) {
   const lines = text.trim().split(/\r?\n/);
@@ -30,7 +37,7 @@ const fires = results.flat().filter((row) => {
   if (seen.has(id)) return false;
   seen.add(id);
   return Number.isFinite(Number(row.latitude)) && Number.isFinite(Number(row.longitude));
-}).map((row, index) => {
+}).filter((row) => booleanPointInPolygon(point([Number(row.longitude), Number(row.latitude)]), spain)).map((row, index) => {
   const confidence = Number.isFinite(Number(row.confidence)) ? Number(row.confidence) : (confidenceScore[row.confidence] ?? 60);
   const frp = Math.max(0, Number(row.frp) || 0);
   const hhmm = String(row.acq_time || '0000').padStart(4, '0');
