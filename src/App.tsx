@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
+import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, Search, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
-import { assessRisk, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance, windDirectionToCardinal } from './services';
-import type { AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, Weather } from './types';
+import { assessRisk, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance, searchSpanishLocations, windDirectionToCardinal } from './services';
+import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
 const decodeVapidKey = (value: string) => {
@@ -15,7 +15,11 @@ export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const [location, setLocation] = useState<Coordinates>(SPAIN_CENTER);
-  const [hasPreciseLocation, setHasPreciseLocation] = useState(false);
+  const [locationKind, setLocationKind] = useState<'general' | 'gps' | 'search'>('general');
+  const [locationLabel, setLocationLabel] = useState('España');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<LocationResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [weather, setWeather] = useState<Weather>(fallbackWeather);
   const [hourly, setHourly] = useState<HourlyForecast[]>([]);
   const [airQuality, setAirQuality] = useState<AirQuality | null>(null);
@@ -35,8 +39,17 @@ export default function App() {
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
   const actionGuidance = useMemo(() => getActionGuidance(risk), [risk]);
+  const hasSelectedLocation = locationKind !== 'general';
+  const hasPreciseLocation = locationKind === 'gps';
 
   useEffect(() => { getWeather(location).then(setWeather); getHourlyForecast(location).then(setHourly); getAirQuality(location).then(setAirQuality); }, [location]);
+
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) { setSearchResults([]); setSearching(false); return; }
+    setSearching(true);
+    const timer = window.setTimeout(() => searchSpanishLocations(searchQuery).then(setSearchResults).finally(() => setSearching(false)), 300);
+    return () => window.clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     const firesUrl = import.meta.env.VITE_FIRES_URL || 'https://aulafy.github.io/meteo/fires.json';
@@ -106,7 +119,7 @@ export default function App() {
     if (!navigator.geolocation) { setToast('La geolocalización no está disponible'); return; }
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       const next: Coordinates = [coords.longitude, coords.latitude];
-      setHasPreciseLocation(true); setLocation(next); mapRef.current?.flyTo({ center: next, zoom: 12 });
+      setLocationKind('gps'); setLocationLabel('Mi ubicación'); setLocation(next); setSearchQuery(''); setSearchResults([]); mapRef.current?.flyTo({ center: next, zoom: 12 });
       setToast('Ubicación actualizada'); window.setTimeout(() => setToast(''), 2500);
     }, () => { setToast('No se pudo obtener tu ubicación. Revisa el permiso del navegador.'); window.setTimeout(() => setToast(''), 4000); });
   }
@@ -123,7 +136,7 @@ export default function App() {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Push no compatible');
       const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }));
       const preciseLocation: Coordinates = [position.coords.longitude, position.coords.latitude];
-      setLocation(preciseLocation); setHasPreciseLocation(true);
+      setLocation(preciseLocation); setLocationKind('gps'); setLocationLabel('Mi ubicación');
       const apiBase = import.meta.env.VITE_PUSH_API_URL || '';
       const keyResponse = await fetch(`${apiBase}/api/push-public-key`);
       if (!keyResponse.ok) throw new Error('Backend no configurado');
@@ -139,6 +152,12 @@ export default function App() {
     }
     setToast(remoteEnabled ? 'Avisos remotos 24/7 activados en un radio de 25 km' : 'Avisos locales activos; el canal remoto aún no está configurado');
     window.setTimeout(() => setToast(''), 4000);
+  }
+
+  function selectSearchedLocation(result: LocationResult) {
+    setLocation(result.coordinates); setLocationKind('search'); setLocationLabel(`${result.name}${result.region ? `, ${result.region}` : ''}`);
+    setSearchQuery(''); setSearchResults([]); mapRef.current?.flyTo({ center: result.coordinates, zoom: 11 });
+    setToast(`Consultando ${result.name}. Las alertas 24/7 siguen vinculadas al GPS del dispositivo.`); window.setTimeout(() => setToast(''), 4500);
   }
 
   async function explainRisk() {
@@ -176,14 +195,14 @@ export default function App() {
       <aside className={`side-panel ${mobilePanel ? 'open' : ''}`}>
         <button className="panel-close" onClick={() => setMobilePanel(false)}><X/></button>
         <section className="status-card" style={{'--risk': riskColor} as React.CSSProperties}>
-          <div className="eyebrow"><Radio size={14}/> {hasPreciseLocation ? 'RIESGO EN TU UBICACIÓN' : 'VISTA GENERAL · ACTIVA TU UBICACIÓN'}</div>
-          <div className="risk-heading"><div><strong>{hasPreciseLocation ? risk.level : 'sin ubicación'}</strong><span>{hasPreciseLocation ? `Índice ${risk.score}/100` : 'Riesgo personal pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasPreciseLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
-          <p>{!hasPreciseLocation ? 'La distancia y el nivel personal no son válidos hasta que compartas tu ubicación.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
-          {hasPreciseLocation && <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
-          {hasPreciseLocation && <div className={`decision-card urgency-${actionGuidance.urgency}`}><small>QUÉ HACER AHORA</small><b>{actionGuidance.title}</b><p>{actionGuidance.message}</p><ol>{actionGuidance.steps.map(step=><li key={step}>{step}</li>)}</ol></div>}
+          <div className="eyebrow"><Radio size={14}/> {locationKind === 'gps' ? 'RIESGO EN TU UBICACIÓN' : locationKind === 'search' ? `CONSULTA · ${locationLabel}` : 'VISTA GENERAL · ELIGE UNA UBICACIÓN'}</div>
+          <div className="risk-heading"><div><strong>{hasSelectedLocation ? risk.level : 'sin ubicación'}</strong><span>{hasSelectedLocation ? `Índice ${risk.score}/100` : 'Riesgo pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasSelectedLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
+          <p>{!hasSelectedLocation ? 'Usa el GPS o busca un municipio para calcular proximidad.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
+          {hasSelectedLocation && <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+          {hasSelectedLocation && <div className={`decision-card urgency-${actionGuidance.urgency}`}><small>{locationKind === 'search' ? 'ORIENTACIÓN PARA ESTA ZONA' : 'QUÉ HACER AHORA'}</small><b>{actionGuidance.title}</b><p>{actionGuidance.message}</p><ol>{actionGuidance.steps.map(step=><li key={step}>{step}</li>)}</ol></div>}
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
-          {hasPreciseLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
-          <button className="ai-button" disabled={!hasPreciseLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasPreciseLocation ? 'Explicar esta situación con IA' : 'Activa ubicación para explicación personal'}</button>
+          {hasSelectedLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
+          <button className="ai-button" disabled={!hasSelectedLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasSelectedLocation ? 'Explicar esta situación con IA' : 'Elige una ubicación para obtener contexto'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
@@ -191,15 +210,15 @@ export default function App() {
           <div className="section-title"><div><h2>Detecciones cercanas</h2><span>NASA FIRMS · actualizado {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
           {fires.length === 0 && <p className="route-copy">Sin detecciones satelitales recientes en España.</p>}
           {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
-            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{hasPreciseLocation ? `${distanceKm.toFixed(1)} km` : 'Ver foco'}</strong><ChevronRight size={17}/>
+            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{hasSelectedLocation ? `${distanceKm.toFixed(1)} km` : 'Ver foco'}</strong><ChevronRight size={17}/>
           </button>)}
         </section>
 
         <section className="panel-section resident-section">
           <div className="section-title"><div><h2>Información para residentes</h2><span>Según tu proximidad y las condiciones</span></div><ShieldCheck size={20}/></div>
-          <div className="resident-grid"><div><small>Distancia</small><b>{hasPreciseLocation && Number.isFinite(risk.distanceKm) ? `${risk.distanceKm.toFixed(1)} km` : 'Activa ubicación'}</b></div><div><small>Aire (AQI UE)</small><b>{airQuality ? airQuality.europeanAqi.toFixed(0) : 'Sin datos'}</b></div><div><small>Partículas PM2.5</small><b>{airQuality ? `${airQuality.pm25.toFixed(0)} µg/m³` : 'Sin datos'}</b></div><div><small>Próxima revisión</small><b>≤ 15 min</b></div></div>
+          <div className="resident-grid"><div><small>Distancia</small><b>{hasSelectedLocation && Number.isFinite(risk.distanceKm) ? `${risk.distanceKm.toFixed(1)} km` : 'Elige ubicación'}</b></div><div><small>Aire (AQI UE)</small><b>{airQuality ? airQuality.europeanAqi.toFixed(0) : 'Sin datos'}</b></div><div><small>Partículas PM2.5</small><b>{airQuality ? `${airQuality.pm25.toFixed(0)} µg/m³` : 'Sin datos'}</b></div><div><small>Próxima revisión</small><b>≤ 15 min</b></div></div>
           <div className="resident-advice"><b>Prepárate antes de recibir una orden</b><ul><li>Móvil cargado, documentación, medicación, agua y llaves.</li><li>Localiza a menores, mayores, dependientes y animales.</li><li>Cierra ventanas si hay humo y evita ejercicio exterior.</li><li>No bloquees carreteras ni vayas a observar el incendio.</li></ul></div>
-          <div className="official-links"><a href="tel:112">Llamar al 112</a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/" target="_blank" rel="noreferrer">Tráfico DGT</a><a href="https://www.proteccioncivil.es/" target="_blank" rel="noreferrer">Protección Civil</a></div>
+          <div className="official-links"><a href="tel:112">Llamar al 112</a><a href="https://www.aemet.es/es/eltiempo/prediccion/avisos" target="_blank" rel="noreferrer">Avisos AEMET</a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/" target="_blank" rel="noreferrer">Tráfico DGT</a><a href="https://www.proteccioncivil.es/" target="_blank" rel="noreferrer">Protección Civil</a></div>
           <div className="advisory"><ShieldCheck size={16}/><span>METEO no dibuja rutas reales sin perímetros, carreteras cortadas y refugios confirmados por las autoridades.</span></div>
         </section>
 
@@ -209,16 +228,17 @@ export default function App() {
         </section>
 
         <section className="sharing">
-          <div><span className="share-icon"><MapPin size={18}/></span><div><b>{hasPreciseLocation ? 'Ubicación activa' : 'Ubicación necesaria'}</b><small>{hasPreciseLocation ? 'Distancias personalizadas activadas' : 'Actívala para conocer tu riesgo real'}</small></div></div>
+          <div><span className="share-icon"><MapPin size={18}/></span><div><b>{hasPreciseLocation ? 'GPS activo' : locationKind === 'search' ? `Consultando ${locationLabel}` : 'Ubicación necesaria'}</b><small>{hasPreciseLocation ? 'Distancias y alertas vinculadas al dispositivo' : locationKind === 'search' ? 'Esta consulta no cambia tus alertas 24/7' : 'Usa GPS o busca un municipio'}</small></div></div>
           <button className="location-inline" onClick={locate}>{hasPreciseLocation ? 'Actualizar' : 'Activar'}</button>
         </section>
       </aside>
 
       <section className="map-wrap">
         <div ref={mapContainer} className="map" />
+        <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>
         <div className="map-tools"><button onClick={locate} title="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()}>+</button><button onClick={() => mapRef.current?.zoomOut()}>−</button></div>
-        <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> Tu ubicación</span></div>
+        <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span></div>
         <div className="weather-strip"><div><Wind/><span><small>VIENTO</small><b>{weather.windSpeed.toFixed(0)} km/h · {weather.windDirection.toFixed(0)}°</b></span></div><div><CloudRain/><span><small>HUMEDAD</small><b>{weather.humidity.toFixed(0)}%</b></span></div><div><Thermometer/><span><small>TEMPERATURA</small><b>{weather.temperature.toFixed(0)}°C</b></span></div><em>{weather.label}</em></div>
       </section>
     </main>

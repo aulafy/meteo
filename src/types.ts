@@ -38,6 +38,13 @@ export interface AirQuality {
   pm10: number;
 }
 
+export interface LocationResult {
+  name: string;
+  region: string;
+  country: string;
+  coordinates: Coordinates;
+}
+
 export type RiskLevel = 'bajo' | 'moderado' | 'alto' | 'extremo';
 
 export interface RiskAssessment {

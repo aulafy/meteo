@@ -1,7 +1,7 @@
 import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
-import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, RiskLevel, Weather } from './types';
+import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, RiskLevel, Weather } from './types';
 
 export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
   try {
@@ -41,6 +41,17 @@ export async function getAirQuality([lng, lat]: Coordinates): Promise<AirQuality
     if (!response.ok) throw new Error('air'); const { current } = await response.json();
     return { europeanAqi: current.european_aqi, pm25: current.pm2_5, pm10: current.pm10 };
   } catch { return null; }
+}
+
+export async function searchSpanishLocations(query: string): Promise<LocationResult[]> {
+  if (query.trim().length < 2) return [];
+  try {
+    const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
+    url.searchParams.set('name', query.trim()); url.searchParams.set('count', '8'); url.searchParams.set('language', 'es'); url.searchParams.set('format', 'json'); url.searchParams.set('countryCode', 'ES');
+    const response = await fetch(url); if (!response.ok) throw new Error('geocoding');
+    const data = await response.json();
+    return (data.results ?? []).filter((item: any) => item.country_code === 'ES').map((item: any) => ({ name: item.name, region: item.admin1 || item.admin2 || '', country: item.country || 'España', coordinates: [item.longitude, item.latitude] as Coordinates }));
+  } catch { return []; }
 }
 
 export function assessRisk(location: Coordinates, fires: Fire[], weather: Weather): RiskAssessment {
