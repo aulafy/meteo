@@ -176,11 +176,11 @@ export default function App() {
         <button className="panel-close" onClick={() => setMobilePanel(false)}><X/></button>
         <section className="status-card" style={{'--risk': riskColor} as React.CSSProperties}>
           <div className="eyebrow"><Radio size={14}/> {hasPreciseLocation ? 'RIESGO EN TU UBICACIÓN' : 'VISTA GENERAL · ACTIVA TU UBICACIÓN'}</div>
-          <div className="risk-heading"><div><strong>{risk.level}</strong><span>Índice {risk.score}/100</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${Math.min(180, risk.score * 1.8)}deg)` }}/></div></div>
+          <div className="risk-heading"><div><strong>{hasPreciseLocation ? risk.level : 'sin ubicación'}</strong><span>{hasPreciseLocation ? `Índice ${risk.score}/100` : 'Riesgo personal pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasPreciseLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
           <p>{!hasPreciseLocation ? 'La distancia y el nivel personal no son válidos hasta que compartas tu ubicación.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
-          <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+          {hasPreciseLocation && <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
-          {risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
+          {hasPreciseLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
           <button className="ai-button" disabled={!hasPreciseLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasPreciseLocation ? 'Explicar esta situación con IA' : 'Activa ubicación para explicación personal'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
@@ -189,7 +189,7 @@ export default function App() {
           <div className="section-title"><div><h2>Detecciones cercanas</h2><span>NASA FIRMS · actualizado {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
           {fires.length === 0 && <p className="route-copy">Sin detecciones satelitales recientes en España.</p>}
           {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
-            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{distanceKm.toFixed(1)} km</strong><ChevronRight size={17}/>
+            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{hasPreciseLocation ? `${distanceKm.toFixed(1)} km` : 'Ver foco'}</strong><ChevronRight size={17}/>
           </button>)}
         </section>
 
