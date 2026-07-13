@@ -15,6 +15,7 @@ export interface Weather {
   temperature: number;
   humidity: number;
   windSpeed: number;
+  windGusts?: number;
   windDirection: number;
   precipitation: number;
   label: string;

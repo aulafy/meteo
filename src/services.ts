@@ -1,4 +1,5 @@
 import distance from '@turf/distance';
+import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
 import type { Coordinates, Fire, RiskAssessment, RiskLevel, SafePlace, Weather } from './types';
 
@@ -7,12 +8,12 @@ export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
     const url = new URL('https://api.open-meteo.com/v1/forecast');
     url.searchParams.set('latitude', String(lat));
     url.searchParams.set('longitude', String(lng));
-    url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m');
+    url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m,wind_direction_10m,wind_gusts_10m');
     url.searchParams.set('wind_speed_unit', 'kmh');
     const res = await fetch(url);
     if (!res.ok) throw new Error('weather');
     const { current } = await res.json();
-    return { temperature: current.temperature_2m, humidity: current.relative_humidity_2m, windSpeed: current.wind_speed_10m, windDirection: current.wind_direction_10m, precipitation: current.precipitation, label: 'Open‑Meteo · ahora' };
+    return { temperature: current.temperature_2m, humidity: current.relative_humidity_2m, windSpeed: current.wind_speed_10m, windGusts: current.wind_gusts_10m, windDirection: current.wind_direction_10m, precipitation: current.precipitation, label: 'Open‑Meteo · ahora' };
   } catch {
     return { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Simulación local' };
   }
@@ -27,13 +28,23 @@ export function assessRisk(location: Coordinates, fires: Fire[], weather: Weathe
   const heat = Math.max(0, weather.temperature - 20) * 1.35;
   const wind = Math.min(35, weather.windSpeed * 0.85);
   const intensity = nearest.fire.intensity * 0.45;
-  const score = Math.round(Math.min(100, proximity * 0.36 + dryness * 0.18 + heat * 0.14 + wind * 0.14 + intensity * 0.18));
+  const fireToResident = (bearing(point(nearest.fire.coordinates), point(location)) + 360) % 360;
+  const downwindDirection = (weather.windDirection + 180) % 360;
+  const angleDifference = Math.abs(((fireToResident - downwindDirection + 540) % 360) - 180);
+  const isDownwind = angleDifference <= 45;
+  const downwindPenalty = isDownwind ? Math.min(18, 5 + weather.windSpeed * 0.45) : 0;
+  let score = Math.round(Math.min(100, proximity * 0.36 + dryness * 0.18 + heat * 0.14 + wind * 0.14 + intensity * 0.18 + downwindPenalty));
+  if (nearest.km <= 5.5 && nearest.fire.confidence >= 70) score = Math.max(score, 65);
+  else if (nearest.km <= 10 && nearest.fire.confidence >= 70) score = Math.max(score, isDownwind ? 60 : 50);
   const level: RiskLevel = score >= 75 ? 'extremo' : score >= 55 ? 'alto' : score >= 30 ? 'moderado' : 'bajo';
   const reasons = [
     `Foco activo a ${nearest.km.toFixed(1)} km`,
+    ...(isDownwind ? ['Tu ubicación está a sotavento de la detección'] : []),
     weather.windSpeed > 25 ? `Rachas de ${weather.windSpeed.toFixed(0)} km/h favorecen la propagación` : `Viento de ${weather.windSpeed.toFixed(0)} km/h`,
     weather.humidity < 30 ? `Humedad crítica del ${weather.humidity.toFixed(0)}%` : `Humedad del ${weather.humidity.toFixed(0)}%`,
   ];
+  const ageHours = Math.max(0, (Date.now() - new Date(nearest.fire.detectedAt).getTime()) / 3600000);
+  reasons.push(`Última observación satelital hace ${ageHours < 1 ? '<1' : Math.round(ageHours)} h`);
   return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: Math.max(5, Math.round(nearest.km * 2.6)) };
 }
 

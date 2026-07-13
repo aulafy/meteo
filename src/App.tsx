@@ -91,6 +91,11 @@ export default function App() {
   }, [location]);
 
   async function calculateRoute() {
+    if (fireMode === 'live') {
+      setToast('Ruta bloqueada: faltan perímetros, cortes y refugios oficiales');
+      window.setTimeout(() => setToast(''), 4500);
+      return;
+    }
     const safe = chooseSafePlace(location, fires, safePlaces);
     const coordinates = await getRoute(location, safe.coordinates);
     setDestination(safe); setRoute(coordinates);
@@ -144,8 +149,8 @@ export default function App() {
         <section className="panel-section route-section">
           <div className="section-title"><div><h2>Ruta de evacuación</h2><span>Calculada según riesgo y viento</span></div><Route size={20}/></div>
           {destination ? <div className="destination"><span><ShieldCheck/></span><div><small>DESTINO RECOMENDADO</small><b>{destination.name}</b><p>{destination.type} · {destination.capacity}</p></div></div> : <p className="route-copy">Busca el punto seguro que minimiza exposición a los focos activos.</p>}
-          <button className="primary" onClick={calculateRoute}><Navigation size={18}/>{route.length ? 'Recalcular ruta segura' : 'Calcular ruta segura'}</button>
-          <div className="advisory"><ShieldCheck size={16}/><span>La ruta evita las áreas de mayor riesgo detectado.</span></div>
+          <button className="primary" disabled={fireMode === 'live'} onClick={calculateRoute}><Navigation size={18}/>{fireMode === 'live' ? 'Ruta pendiente de datos oficiales' : route.length ? 'Recalcular ruta segura' : 'Calcular ruta segura'}</button>
+          <div className="advisory"><ShieldCheck size={16}/><span>{fireMode === 'live' ? 'No se recomendará una ruta sin perímetros, cortes y refugios verificados.' : 'La ruta es una simulación y evita las áreas de mayor riesgo detectado.'}</span></div>
         </section>
 
         <section className="sharing">

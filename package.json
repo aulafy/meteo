@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@turf/bearing": "^7.2.0",
+    "@turf/boolean-point-in-polygon": "^7.3.5",
     "@turf/distance": "^7.2.0",
     "@turf/helpers": "^7.2.0",
     "@turf/nearest-point-on-line": "^7.2.0",
@@ -18,11 +19,14 @@
     "lucide-react": "^0.468.0",
     "maplibre-gl": "^5.1.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "@types/topojson-client": "^3.1.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
