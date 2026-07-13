@@ -7,6 +7,10 @@ import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './ty
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
 const emptyCollection = (): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features: [] });
+const decodeVapidKey = (value: string) => {
+  const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+};
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -146,7 +150,25 @@ export default function App() {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') { setToast('Permiso de notificaciones no concedido'); return; }
     localStorage.setItem('meteo_local_alerts', 'true');
-    setRegistered(true); setShowRegister(false); setToast('Avisos locales activados mientras METEO esté abierto');
+    setRegistered(true); setShowRegister(false);
+    let remoteEnabled = false;
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Push no compatible');
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }));
+      const apiBase = import.meta.env.VITE_PUSH_API_URL || '';
+      const keyResponse = await fetch(`${apiBase}/api/push-public-key`);
+      if (!keyResponse.ok) throw new Error('Backend no configurado');
+      const { publicKey } = await keyResponse.json();
+      const registration = await navigator.serviceWorker.register('./sw.js');
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(publicKey) });
+      const response = await fetch(`${apiBase}/api/subscriptions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: subscription.toJSON(), latitude: position.coords.latitude, longitude: position.coords.longitude, radiusKm: 25, consentVersion: '2026-07-13' }) });
+      if (!response.ok) throw new Error('No se pudo guardar la suscripción');
+      remoteEnabled = true;
+    } catch {
+      remoteEnabled = false;
+    }
+    setToast(remoteEnabled ? 'Avisos remotos 24/7 activados en un radio de 25 km' : 'Avisos locales activos; el canal remoto aún no está configurado');
     window.setTimeout(() => setToast(''), 4000);
   }
 

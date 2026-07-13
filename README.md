@@ -22,6 +22,12 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 
 El proyecto está preparado para Vercel mediante `vercel.json`. Las detecciones FIRMS se publican cada 15 minutos en el feed estático de GitHub Pages y la aplicación desplegada en Vercel consume ese feed sin exponer la clave de NASA. Puede configurarse otro feed mediante `VITE_FIRES_URL`.
 
+### Web Push remoto
+
+El directorio `api/` contiene funciones Vercel para suscribir dispositivos y evaluar alertas. Aplica `supabase/migrations/001_push_alerts.sql` en un proyecto Supabase con PostGIS y configura las variables de `.env.example` en Vercel. Genera las claves mediante `npx web-push generate-vapid-keys`.
+
+El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Solo envía detecciones FIRMS con confianza mínima del 70%, observadas durante las últimas 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
+
 ## Arquitectura de producción recomendada
 
 El cliente nunca debería decidir por sí solo una evacuación real. Un backend debe ingerir NASA FIRMS y fuentes oficiales regionales, normalizar focos en PostGIS, calcular corredores con una red vial y polígonos de propagación, y enviar notificaciones mediante Web Push/SMS. La ruta mostrada debe identificarse siempre como recomendación complementaria a Protección Civil y 112.
