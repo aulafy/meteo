@@ -19,6 +19,7 @@ export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
 }
 
 export function assessRisk(location: Coordinates, fires: Fire[], weather: Weather): RiskAssessment {
+  if (!fires.length) return { score: 0, level: 'bajo', distanceKm: Infinity, reasons: ['No hay detecciones satelitales recientes en España'], etaMinutes: 0 };
   const ranked = fires.map((fire) => ({ fire, km: distance(point(location), point(fire.coordinates), { units: 'kilometers' }) })).sort((a, b) => a.km - b.km);
   const nearest = ranked[0];
   const proximity = Math.max(0, 100 - nearest.km * 7);
@@ -39,7 +40,7 @@ export function assessRisk(location: Coordinates, fires: Fire[], weather: Weathe
 export function chooseSafePlace(location: Coordinates, fires: Fire[], places: SafePlace[]): SafePlace {
   return places.map((place) => {
     const userDistance = distance(point(location), point(place.coordinates), { units: 'kilometers' });
-    const fireDistance = Math.min(...fires.map((fire) => distance(point(place.coordinates), point(fire.coordinates), { units: 'kilometers' })));
+    const fireDistance = fires.length ? Math.min(...fires.map((fire) => distance(point(place.coordinates), point(fire.coordinates), { units: 'kilometers' }))) : 20;
     return { place, score: userDistance - Math.min(fireDistance, 20) * 0.7 };
   }).sort((a, b) => a.score - b.score)[0].place;
 }

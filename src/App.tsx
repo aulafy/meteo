@@ -3,7 +3,7 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibr
 import { Bell, ChevronRight, CloudRain, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { DEMO_CENTER, demoFires, safePlaces } from './data';
 import { assessRisk, chooseSafePlace, getRoute, getWeather } from './services';
-import type { Coordinates, RiskAssessment, SafePlace, Weather } from './types';
+import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
 const emptyCollection = (): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features: [] });
@@ -21,10 +21,21 @@ export default function App() {
   const [toast, setToast] = useState('');
   const [mobilePanel, setMobilePanel] = useState(false);
   const [lastSync, setLastSync] = useState(new Date());
+  const [fires, setFires] = useState<Fire[]>(demoFires);
+  const [fireMode, setFireMode] = useState<'live' | 'demo'>('demo');
+  const firesRef = useRef<Fire[]>(demoFires);
 
-  const risk: RiskAssessment = useMemo(() => assessRisk(location, demoFires, weather), [location, weather]);
+  const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
 
   useEffect(() => { getWeather(location).then(setWeather); }, [location]);
+
+  useEffect(() => {
+    fetch('./fires.json', { cache: 'no-store' }).then(async (response) => {
+      if (!response.ok) throw new Error('FIRMS no disponible');
+      const data = await response.json() as { generatedAt: string; fires: Fire[] };
+      setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt));
+    }).catch(() => { setFires(demoFires); setFireMode('demo'); });
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setLastSync(new Date()), 60000);
@@ -43,7 +54,7 @@ export default function App() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
     map.on('load', () => {
-      map.addSource('fires', { type: 'geojson', data: { type: 'FeatureCollection', features: demoFires.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
+      map.addSource('fires', { type: 'geojson', data: { type: 'FeatureCollection', features: firesRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
       map.addLayer({ id: 'fire-glow', type: 'circle', source: 'fires', paint: { 'circle-radius': ['interpolate', ['linear'], ['get', 'intensity'], 0, 22, 100, 44], 'circle-color': '#ff6a2a', 'circle-opacity': 0.14, 'circle-blur': 0.6 } });
       map.addLayer({ id: 'fire-points', type: 'circle', source: 'fires', paint: { 'circle-radius': 8, 'circle-color': '#ff4d26', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff5ee' } });
       map.addSource('safe-places', { type: 'geojson', data: { type: 'FeatureCollection', features: safePlaces.map((s) => ({ type: 'Feature', properties: s, geometry: { type: 'Point', coordinates: s.coordinates } })) } });
@@ -66,13 +77,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    firesRef.current = fires;
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded()) return;
+    (map.getSource('fires') as GeoJSONSource)?.setData({ type: 'FeatureCollection', features: fires.map((fire) => ({ type: 'Feature', properties: fire, geometry: { type: 'Point', coordinates: fire.coordinates } })) });
+  }, [fires]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
     (map.getSource('user') as GeoJSONSource)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } });
   }, [location]);
 
   async function calculateRoute() {
-    const safe = chooseSafePlace(location, demoFires, safePlaces);
+    const safe = chooseSafePlace(location, fires, safePlaces);
     const coordinates = await getRoute(location, safe.coordinates);
     setDestination(safe); setRoute(coordinates);
     const map = mapRef.current;
@@ -99,7 +117,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>FUEGO SEGURO</b><span>Vigilancia y evacuación</span></div></div>
-      <div className="live"><span /> DATOS EN VIVO</div>
+      <div className="live"><span /> {fireMode === 'live' ? 'NASA FIRMS EN VIVO' : 'MODO DEMO'}</div>
       <nav><button className="nav-link active">Mapa</button><button className="nav-link">Alertas</button><button className="nav-link">Preparación</button></nav>
       <div className="top-actions"><button className="icon-button" aria-label="Notificaciones"><Bell size={19}/><i>2</i></button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mi cuenta' : 'Registrarme'}</span></button><button className="mobile-menu" onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>
     </header>
@@ -115,9 +133,10 @@ export default function App() {
         </section>
 
         <section className="panel-section">
-          <div className="section-title"><div><h2>Incendios cercanos</h2><span>Actualizado {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-3.93,40.30],[-3.50,40.57]], {padding:60})}>Ver todos</button></div>
-          {demoFires.slice(0,2).map((fire, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
-            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{i === 0 ? 'Activo · ' : 'En observación · '}{fire.intensity}% intensidad</small></div><strong>{i === 0 ? risk.distanceKm.toFixed(1) : '12.4'} km</strong><ChevronRight size={17}/>
+          <div className="section-title"><div><h2>Incendios cercanos</h2><span>{fireMode === 'live' ? 'NASA FIRMS' : 'MODO DEMO'} · {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
+          {fires.length === 0 && <p className="route-copy">Sin detecciones satelitales recientes en España.</p>}
+          {fires.slice(0,3).map((fire, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
+            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source} · {fire.intensity}% índice térmico</small></div><strong>{fire.frp != null ? `${fire.frp.toFixed(1)} MW` : `${risk.distanceKm.toFixed(1)} km`}</strong><ChevronRight size={17}/>
           </button>)}
         </section>
 
