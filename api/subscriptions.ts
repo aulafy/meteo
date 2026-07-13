@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { database, json } from './_lib.js';
+import { type ApiRequest, type ApiResponse, database, json } from './_lib.js';
 
 const subscriptionSchema = z.object({
   subscription: z.object({
@@ -14,18 +14,18 @@ const subscriptionSchema = z.object({
   consentVersion: z.literal('2026-07-13'),
 });
 
-export default async function handler(request: Request) {
-  if (request.method !== 'POST' && request.method !== 'DELETE') return json({ error: 'Método no permitido' }, 405);
+export default async function handler(request: ApiRequest, response: ApiResponse) {
+  if (request.method !== 'POST' && request.method !== 'DELETE') return json(response, { error: 'Método no permitido' }, 405);
   try {
     const db = database();
     if (request.method === 'DELETE') {
-      const { endpoint } = z.object({ endpoint: z.string().url() }).parse(await request.json());
+      const { endpoint } = z.object({ endpoint: z.string().url() }).parse(request.body);
       const endpointHash = createHash('sha256').update(endpoint).digest('hex');
       const { error } = await db.from('push_subscriptions').delete().eq('endpoint_hash', endpointHash);
       if (error) throw error;
-      return json({ ok: true });
+      return json(response, { ok: true });
     }
-    const input = subscriptionSchema.parse(await request.json());
+    const input = subscriptionSchema.parse(request.body);
     const endpointHash = createHash('sha256').update(input.subscription.endpoint).digest('hex');
     const { error } = await db.from('push_subscriptions').upsert({
       endpoint_hash: endpointHash,
@@ -41,9 +41,9 @@ export default async function handler(request: Request) {
       active: true,
     }, { onConflict: 'endpoint_hash' });
     if (error) throw error;
-    return json({ ok: true }, 201);
+    return json(response, { ok: true }, 201);
   } catch (error) {
     const message = error instanceof z.ZodError ? 'Datos de suscripción inválidos' : error instanceof Error ? error.message : 'Error interno';
-    return json({ error: message }, message === 'Backend no configurado' ? 503 : 400);
+    return json(response, { error: message }, message === 'Backend no configurado' ? 503 : 400);
   }
 }

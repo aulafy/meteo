@@ -1,15 +1,15 @@
 import webpush from 'web-push';
-import { authorizedCron, database, distanceKm, json } from '../_lib.js';
+import { type ApiRequest, type ApiResponse, authorizedCron, database, distanceKm, json } from '../_lib.js';
 
 type Fire = { id: string; coordinates: [number, number]; confidence: number; frp?: number; detectedAt: string };
 
-export default async function handler(request: Request) {
-  if (!authorizedCron(request)) return json({ error: 'No autorizado' }, 401);
+export default async function handler(request: ApiRequest, response: ApiResponse) {
+  if (!authorizedCron(request)) return json(response, { error: 'No autorizado' }, 401);
   try {
     const publicKey = process.env.VAPID_PUBLIC_KEY;
     const privateKey = process.env.VAPID_PRIVATE_KEY;
     const subject = process.env.VAPID_SUBJECT || 'mailto:alerts@meteo.app';
-    if (!publicKey || !privateKey) return json({ error: 'VAPID no configurado' }, 503);
+    if (!publicKey || !privateKey) return json(response, { error: 'VAPID no configurado' }, 503);
     webpush.setVapidDetails(subject, publicKey, privateKey);
     const feedUrl = process.env.FIRMS_FEED_URL || 'https://aulafy.github.io/meteo/fires.json';
     const feed = await fetch(feedUrl, { cache: 'no-store' }).then((response) => response.json()) as { fires: Fire[] };
@@ -32,8 +32,8 @@ export default async function handler(request: Request) {
         if (pushError?.statusCode === 404 || pushError?.statusCode === 410) await db.from('push_subscriptions').update({ active: false }).eq('id', subscription.id);
       }
     }
-    return json({ ok: true, evaluated: subscriptions?.length ?? 0, fires: recentFires.length, sent });
+    return json(response, { ok: true, evaluated: subscriptions?.length ?? 0, fires: recentFires.length, sent });
   } catch (error) {
-    return json({ error: error instanceof Error ? error.message : 'Error interno' }, 500);
+    return json(response, { error: error instanceof Error ? error.message : 'Error interno' }, 500);
   }
 }

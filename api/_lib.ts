@@ -1,7 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-export function json(data: unknown, status = 200) {
-  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
+export type ApiRequest = {
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: unknown;
+};
+
+export type ApiResponse = {
+  status(code: number): ApiResponse;
+  setHeader(name: string, value: string): ApiResponse;
+  json(data: unknown): void;
+};
+
+export function json(response: ApiResponse, data: unknown, status = 200) {
+  response.setHeader('Cache-Control', 'no-store');
+  response.status(status).json(data);
 }
 
 export function database() {
@@ -11,9 +24,10 @@ export function database() {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-export function authorizedCron(request: Request) {
+export function authorizedCron(request: ApiRequest) {
   const secret = process.env.CRON_SECRET;
-  return Boolean(secret && request.headers.get('authorization') === `Bearer ${secret}`);
+  const authorization = request.headers.authorization;
+  return Boolean(secret && authorization === `Bearer ${secret}`);
 }
 
 export function distanceKm(a: [number, number], b: [number, number]) {
