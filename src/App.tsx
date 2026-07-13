@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, TestTube2, Thermometer, UserRound, Wind, X } from 'lucide-react';
-import { DEMO_CENTER, demoFires, safePlaces } from './data';
-import { assessRisk, chooseSafePlace, getDownwindLocation, getRoute, getWeather, rankFiresByDistance } from './services';
-import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './types';
+import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
+import { SPAIN_CENTER } from './data';
+import { assessRisk, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance } from './services';
+import type { AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
-const emptyCollection = (): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features: [] });
 const decodeVapidKey = (value: string) => {
   const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
@@ -15,21 +14,20 @@ const decodeVapidKey = (value: string) => {
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const [location, setLocation] = useState<Coordinates>(DEMO_CENTER);
+  const [location, setLocation] = useState<Coordinates>(SPAIN_CENTER);
+  const [hasPreciseLocation, setHasPreciseLocation] = useState(false);
   const [weather, setWeather] = useState<Weather>(fallbackWeather);
-  const [route, setRoute] = useState<Coordinates[]>([]);
-  const [destination, setDestination] = useState<SafePlace | null>(null);
-  const [sharing, setSharing] = useState(true);
+  const [hourly, setHourly] = useState<HourlyForecast[]>([]);
+  const [airQuality, setAirQuality] = useState<AirQuality | null>(null);
   const [registered, setRegistered] = useState(() => typeof Notification !== 'undefined' && Notification.permission === 'granted' && localStorage.getItem('meteo_local_alerts') === 'true');
   const [showRegister, setShowRegister] = useState(false);
   const [toast, setToast] = useState('');
   const [mobilePanel, setMobilePanel] = useState(false);
   const [lastSync, setLastSync] = useState(new Date());
-  const [fires, setFires] = useState<Fire[]>(demoFires);
-  const [fireMode, setFireMode] = useState<'live' | 'demo'>('demo');
-  const firesRef = useRef<Fire[]>(demoFires);
+  const [fires, setFires] = useState<Fire[]>([]);
+  const [fireMode, setFireMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const firesRef = useRef<Fire[]>([]);
   const notifiedFireRef = useRef('');
-  const [simulatedScenario, setSimulatedScenario] = useState(false);
   const [aiGuidance, setAiGuidance] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [showAi, setShowAi] = useState(false);
@@ -37,7 +35,7 @@ export default function App() {
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
 
-  useEffect(() => { getWeather(location).then(setWeather); }, [location]);
+  useEffect(() => { getWeather(location).then(setWeather); getHourlyForecast(location).then(setHourly); getAirQuality(location).then(setAirQuality); }, [location]);
 
   useEffect(() => {
     const firesUrl = import.meta.env.VITE_FIRES_URL || 'https://aulafy.github.io/meteo/fires.json';
@@ -45,16 +43,16 @@ export default function App() {
       if (!response.ok) throw new Error('FIRMS no disponible');
       const data = await response.json() as { generatedAt: string; fires: Fire[] };
       setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt));
-    }).catch(() => { setFires(demoFires); setFireMode('demo'); });
+    }).catch(() => { setFires([]); setFireMode('error'); });
   }, []);
 
   useEffect(() => {
-    if (!registered || simulatedScenario || !risk.nearestFire || !['alto', 'extremo'].includes(risk.level) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (!registered || !hasPreciseLocation || !risk.nearestFire || !['alto', 'extremo'].includes(risk.level) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const notificationKey = `${risk.nearestFire.id}:${risk.level}`;
     if (notifiedFireRef.current === notificationKey) return;
     notifiedFireRef.current = notificationKey;
     new Notification(`METEO · Riesgo ${risk.level}`, { body: `Detección satelital a ${risk.distanceKm.toFixed(1)} km. Consulta 112 y Protección Civil.`, icon: './favicon.svg', tag: notificationKey });
-  }, [registered, simulatedScenario, risk]);
+  }, [registered, hasPreciseLocation, risk]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setLastSync(new Date()), 60000);
@@ -76,11 +74,6 @@ export default function App() {
       map.addSource('fires', { type: 'geojson', data: { type: 'FeatureCollection', features: firesRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
       map.addLayer({ id: 'fire-glow', type: 'circle', source: 'fires', paint: { 'circle-radius': ['interpolate', ['linear'], ['get', 'intensity'], 0, 22, 100, 44], 'circle-color': '#ff6a2a', 'circle-opacity': 0.14, 'circle-blur': 0.6 } });
       map.addLayer({ id: 'fire-points', type: 'circle', source: 'fires', paint: { 'circle-radius': 8, 'circle-color': '#ff4d26', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff5ee' } });
-      map.addSource('safe-places', { type: 'geojson', data: { type: 'FeatureCollection', features: safePlaces.map((s) => ({ type: 'Feature', properties: s, geometry: { type: 'Point', coordinates: s.coordinates } })) } });
-      map.addLayer({ id: 'safe-places', type: 'circle', source: 'safe-places', paint: { 'circle-radius': 7, 'circle-color': '#176b50', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } });
-      map.addSource('route', { type: 'geojson', data: emptyCollection() });
-      map.addLayer({ id: 'route-casing', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 8, 'line-opacity': 0.9 } });
-      map.addLayer({ id: 'route', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#147355', 'line-width': 5, 'line-opacity': 0.95 } });
       map.addSource('user', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } } });
       map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: { 'circle-radius': 18, 'circle-color': '#147355', 'circle-opacity': 0.16 } });
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
@@ -108,43 +101,13 @@ export default function App() {
     (map.getSource('user') as GeoJSONSource)?.setData({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } });
   }, [location]);
 
-  async function calculateRoute() {
-    if (fireMode === 'live') {
-      setToast('Ruta bloqueada: faltan perímetros, cortes y refugios oficiales');
-      window.setTimeout(() => setToast(''), 4500);
-      return;
-    }
-    const safe = chooseSafePlace(location, fires, safePlaces);
-    const coordinates = await getRoute(location, safe.coordinates);
-    setDestination(safe); setRoute(coordinates);
-    const map = mapRef.current;
-    if (map?.getSource('route')) {
-      (map.getSource('route') as GeoJSONSource).setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } });
-      const bounds = coordinates.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-      map.fitBounds(bounds, { padding: 90, maxZoom: 14 });
-    }
-    setToast('Ruta recalculada evitando las zonas de riesgo');
-    window.setTimeout(() => setToast(''), 3500);
-  }
-
   function locate() {
     if (!navigator.geolocation) { setToast('La geolocalización no está disponible'); return; }
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       const next: Coordinates = [coords.longitude, coords.latitude];
-      setSimulatedScenario(false); setLocation(next); mapRef.current?.flyTo({ center: next, zoom: 12 });
+      setHasPreciseLocation(true); setLocation(next); mapRef.current?.flyTo({ center: next, zoom: 12 });
       setToast('Ubicación actualizada'); window.setTimeout(() => setToast(''), 2500);
-    }, () => { setToast('Usamos la ubicación de demostración. Revisa el permiso del navegador.'); window.setTimeout(() => setToast(''), 4000); });
-  }
-
-  async function simulateFiveKmScenario() {
-    const fire = [...fires].filter((item) => item.confidence >= 70).sort((a, b) => (b.frp ?? 0) - (a.frp ?? 0))[0];
-    if (!fire) { setToast('No hay una detección adecuada para el ensayo'); return; }
-    const fireWeather = await getWeather(fire.coordinates);
-    const resident = getDownwindLocation(fire.coordinates, fireWeather.windDirection, 5);
-    setSimulatedScenario(true); setWeather(fireWeather); setLocation(resident);
-    mapRef.current?.flyTo({ center: resident, zoom: 11.5 });
-    setToast('Ensayo activo: residente simulado a 5 km y a sotavento');
-    window.setTimeout(() => setToast(''), 4500);
+    }, () => { setToast('No se pudo obtener tu ubicación. Revisa el permiso del navegador.'); window.setTimeout(() => setToast(''), 4000); });
   }
 
   async function activateLocalAlerts(event: React.FormEvent<HTMLFormElement>) {
@@ -158,6 +121,8 @@ export default function App() {
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Push no compatible');
       const position = await new Promise<GeolocationPosition>((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }));
+      const preciseLocation: Coordinates = [position.coords.longitude, position.coords.latitude];
+      setLocation(preciseLocation); setHasPreciseLocation(true);
       const apiBase = import.meta.env.VITE_PUSH_API_URL || '';
       const keyResponse = await fetch(`${apiBase}/api/push-public-key`);
       if (!keyResponse.ok) throw new Error('Backend no configurado');
@@ -201,7 +166,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>METEO</b><span>Alertas y rutas seguras</span></div></div>
-      <div className="live"><span /> {fireMode === 'live' ? 'NASA FIRMS EN VIVO' : 'MODO DEMO'}</div>
+      <div className="live"><span /> {fireMode === 'live' ? 'NASA FIRMS ACTUALIZADO' : fireMode === 'loading' ? 'CARGANDO DATOS' : 'FIRMS NO DISPONIBLE'}</div>
       <nav><button className="nav-link active">Mapa</button><button className="nav-link">Alertas</button><button className="nav-link">Preparación</button></nav>
       <div className="top-actions"><button className="icon-button" aria-label="Notificaciones"><Bell size={19}/><i>2</i></button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mi cuenta' : 'Registrarme'}</span></button><button className="mobile-menu" onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>
     </header>
@@ -210,42 +175,47 @@ export default function App() {
       <aside className={`side-panel ${mobilePanel ? 'open' : ''}`}>
         <button className="panel-close" onClick={() => setMobilePanel(false)}><X/></button>
         <section className="status-card" style={{'--risk': riskColor} as React.CSSProperties}>
-          <div className="eyebrow"><Radio size={14}/> {simulatedScenario ? 'ENSAYO DE SEGURIDAD · NO ES TU UBICACIÓN' : 'NIVEL DE RIESGO ACTUAL'}</div>
+          <div className="eyebrow"><Radio size={14}/> {hasPreciseLocation ? 'RIESGO EN TU UBICACIÓN' : 'VISTA GENERAL · ACTIVA TU UBICACIÓN'}</div>
           <div className="risk-heading"><div><strong>{risk.level}</strong><span>Índice {risk.score}/100</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${Math.min(180, risk.score * 1.8)}deg)` }}/></div></div>
-          <p>{risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
+          <p>{!hasPreciseLocation ? 'La distancia y el nivel personal no son válidos hasta que compartas tu ubicación.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
           <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
           {risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
-          <button className="ai-button" onClick={explainRisk}><Bot size={17}/> Explicar esta situación con IA</button>
+          <button className="ai-button" disabled={!hasPreciseLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasPreciseLocation ? 'Explicar esta situación con IA' : 'Activa ubicación para explicación personal'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
         <section className="panel-section">
-          <div className="section-title"><div><h2>Incendios cercanos</h2><span>{fireMode === 'live' ? 'NASA FIRMS' : 'MODO DEMO'} · {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
+          <div className="section-title"><div><h2>Detecciones cercanas</h2><span>NASA FIRMS · actualizado {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
           {fires.length === 0 && <p className="route-copy">Sin detecciones satelitales recientes en España.</p>}
           {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
             <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{distanceKm.toFixed(1)} km</strong><ChevronRight size={17}/>
           </button>)}
         </section>
 
-        <section className="panel-section route-section">
-          <div className="section-title"><div><h2>Ruta de evacuación</h2><span>Calculada según riesgo y viento</span></div><Route size={20}/></div>
-          {destination ? <div className="destination"><span><ShieldCheck/></span><div><small>DESTINO RECOMENDADO</small><b>{destination.name}</b><p>{destination.type} · {destination.capacity}</p></div></div> : <p className="route-copy">Busca el punto seguro que minimiza exposición a los focos activos.</p>}
-          <button className="primary" disabled={fireMode === 'live'} onClick={calculateRoute}><Navigation size={18}/>{fireMode === 'live' ? 'Ruta pendiente de datos oficiales' : route.length ? 'Recalcular ruta segura' : 'Calcular ruta segura'}</button>
-          <div className="advisory"><ShieldCheck size={16}/><span>{fireMode === 'live' ? 'No se recomendará una ruta sin perímetros, cortes y refugios verificados.' : 'La ruta es una simulación y evita las áreas de mayor riesgo detectado.'}</span></div>
+        <section className="panel-section resident-section">
+          <div className="section-title"><div><h2>Información para residentes</h2><span>Según tu proximidad y las condiciones</span></div><ShieldCheck size={20}/></div>
+          <div className="resident-grid"><div><small>Distancia</small><b>{hasPreciseLocation && Number.isFinite(risk.distanceKm) ? `${risk.distanceKm.toFixed(1)} km` : 'Activa ubicación'}</b></div><div><small>Aire (AQI UE)</small><b>{airQuality ? airQuality.europeanAqi.toFixed(0) : 'Sin datos'}</b></div><div><small>Partículas PM2.5</small><b>{airQuality ? `${airQuality.pm25.toFixed(0)} µg/m³` : 'Sin datos'}</b></div><div><small>Próxima revisión</small><b>≤ 15 min</b></div></div>
+          <div className="resident-advice"><b>Prepárate antes de recibir una orden</b><ul><li>Móvil cargado, documentación, medicación, agua y llaves.</li><li>Localiza a menores, mayores, dependientes y animales.</li><li>Cierra ventanas si hay humo y evita ejercicio exterior.</li><li>No bloquees carreteras ni vayas a observar el incendio.</li></ul></div>
+          <div className="official-links"><a href="tel:112">Llamar al 112</a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/" target="_blank" rel="noreferrer">Tráfico DGT</a><a href="https://www.proteccioncivil.es/" target="_blank" rel="noreferrer">Protección Civil</a></div>
+          <div className="advisory"><ShieldCheck size={16}/><span>METEO no dibuja rutas reales sin perímetros, carreteras cortadas y refugios confirmados por las autoridades.</span></div>
+        </section>
+
+        <section className="panel-section">
+          <div className="section-title"><div><h2>Próximas 12 horas</h2><span>Pronóstico Open‑Meteo · tecnología MeteoFlow</span></div><Wind size={20}/></div>
+          {hourly.length ? <div className="hourly-forecast">{hourly.filter((_, index) => index % 2 === 0).slice(0,6).map((hour) => <div className="hourly-item" key={hour.time}><small>{new Date(hour.time).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}</small><b>{hour.temperature.toFixed(0)}°</b><span><Wind size={12}/>{hour.windSpeed.toFixed(0)} km/h</span><span>H {hour.humidity.toFixed(0)}%</span></div>)}</div> : <p className="route-copy">Pronóstico no disponible temporalmente.</p>}
         </section>
 
         <section className="sharing">
-          <div><span className="share-icon"><MapPin size={18}/></span><div><b>Compartir mi ubicación</b><small>Para recibir alertas cercanas</small></div></div>
-          <label className="switch"><input type="checkbox" checked={sharing} onChange={(e)=>setSharing(e.target.checked)}/><span/></label>
+          <div><span className="share-icon"><MapPin size={18}/></span><div><b>{hasPreciseLocation ? 'Ubicación activa' : 'Ubicación necesaria'}</b><small>{hasPreciseLocation ? 'Distancias personalizadas activadas' : 'Actívala para conocer tu riesgo real'}</small></div></div>
+          <button className="location-inline" onClick={locate}>{hasPreciseLocation ? 'Actualizar' : 'Activar'}</button>
         </section>
-        <button className="scenario-button" onClick={simulateFiveKmScenario}><TestTube2 size={17}/><span><b>Probar alerta a 5 km</b><small>Ensayo con un foco FIRMS real</small></span></button>
       </aside>
 
       <section className="map-wrap">
         <div ref={mapContainer} className="map" />
         <div className="map-tools"><button onClick={locate} title="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()}>+</button><button onClick={() => mapRef.current?.zoomOut()}>−</button></div>
-        <div className="map-meta"><span><i className="fire-dot"/> Incendio activo</span><span><i className="safe-dot"/> Punto seguro</span><span><i className="route-line"/> Ruta recomendada</span></div>
+        <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> Tu ubicación</span></div>
         <div className="weather-strip"><div><Wind/><span><small>VIENTO</small><b>{weather.windSpeed.toFixed(0)} km/h · {weather.windDirection.toFixed(0)}°</b></span></div><div><CloudRain/><span><small>HUMEDAD</small><b>{weather.humidity.toFixed(0)}%</b></span></div><div><Thermometer/><span><small>TEMPERATURA</small><b>{weather.temperature.toFixed(0)}°C</b></span></div><em>{weather.label}</em></div>
       </section>
     </main>

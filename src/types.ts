@@ -8,7 +8,7 @@ export interface Fire {
   intensity: number;
   frp?: number;
   detectedAt: string;
-  source: 'NASA FIRMS' | 'Demo';
+  source: 'NASA FIRMS';
 }
 
 export interface Weather {
@@ -21,12 +21,20 @@ export interface Weather {
   label: string;
 }
 
-export interface SafePlace {
-  id: string;
-  name: string;
-  type: 'refugio' | 'hospital' | 'punto seguro';
-  coordinates: Coordinates;
-  capacity: string;
+export interface HourlyForecast {
+  time: string;
+  temperature: number;
+  humidity: number;
+  windSpeed: number;
+  windGusts: number;
+  windDirection: number;
+  precipitationProbability: number;
+}
+
+export interface AirQuality {
+  europeanAqi: number;
+  pm25: number;
+  pm10: number;
 }
 
 export type RiskLevel = 'bajo' | 'moderado' | 'alto' | 'extremo';

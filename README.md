@@ -9,14 +9,21 @@ npm install
 npm run dev
 ```
 
-Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador. Si se deniega, se usa Madrid como escenario de demostración.
+Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador. Si se deniega, METEO mantiene la vista general de España y no presenta distancias ni riesgo como si fueran personales.
 
 ## Datos
 
-- Meteorología actual: Open-Meteo, con fallback local.
-- Rutas: servidor público OSRM, con fallback a línea directa.
+- Meteorología actual, pronóstico horario y calidad del aire: Open-Meteo.
 - Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
 - Cartografía: OpenFreeMap/MapLibre.
+
+## Integración con MeteoFlow
+
+METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambos bajo MIT, el patrón de consulta y normalización de Open‑Meteo para pronóstico horario y calidad del aire. Se adaptó al contexto de incendios: muestra viento, rachas, humedad y partículas durante las próximas 12 horas, sin incorporar el paisaje 3D ni elementos meteorológicos que distraigan durante una emergencia.
+
+## Función de Groq
+
+El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente en una explicación breve: situación, acciones inmediatas y datos desconocidos. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
 
 ## Despliegue
 
@@ -34,7 +41,7 @@ El cliente nunca debería decidir por sí solo una evacuación real. Un backend 
 
 ## Aviso
 
-Este MVP es demostrativo y no sustituye las instrucciones de emergencias. Para desplegarlo hacen falta validación con autoridades, pruebas de carga, auditoría de privacidad/consentimiento, retención mínima de ubicaciones y redundancia de proveedores.
+METEO no sustituye las instrucciones de emergencias. Para su adopción pública hacen falta validación con autoridades, pruebas de carga, auditoría de privacidad/consentimiento, retención mínima de ubicaciones y redundancia de proveedores.
 
 Las detecciones FIRMS son puntos térmicos observados por satélite, no incendios confirmados ni perímetros operativos. Pueden llegar con retraso debido a la órbita, nubosidad o procesamiento y deben contrastarse con 112, Protección Civil y los servicios autonómicos.
 
