@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { AlertTriangle, Bell, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, TestTube2, Thermometer, UserRound, Wind, X } from 'lucide-react';
+import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, TestTube2, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { DEMO_CENTER, demoFires, safePlaces } from './data';
 import { assessRisk, chooseSafePlace, getDownwindLocation, getRoute, getWeather, rankFiresByDistance } from './services';
 import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './types';
@@ -30,6 +30,9 @@ export default function App() {
   const firesRef = useRef<Fire[]>(demoFires);
   const notifiedFireRef = useRef('');
   const [simulatedScenario, setSimulatedScenario] = useState(false);
+  const [aiGuidance, setAiGuidance] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [showAi, setShowAi] = useState(false);
 
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
@@ -172,6 +175,27 @@ export default function App() {
     window.setTimeout(() => setToast(''), 4000);
   }
 
+  async function explainRisk() {
+    setShowAi(true); setAiLoading(true); setAiGuidance('');
+    try {
+      const response = await fetch('/api/ai-guidance', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          riskLevel: risk.level, riskScore: risk.score,
+          distanceKm: Number.isFinite(risk.distanceKm) ? risk.distanceKm : null,
+          confidence: risk.nearestFire?.confidence ?? null, frp: risk.nearestFire?.frp ?? null,
+          weather: { temperature: weather.temperature, humidity: weather.humidity, windSpeed: weather.windSpeed, windDirection: weather.windDirection },
+          reasons: risk.reasons,
+        }),
+      });
+      const data = await response.json() as { guidance?: string; error?: string };
+      if (!response.ok || !data.guidance) throw new Error(data.error || 'Asistente no disponible');
+      setAiGuidance(data.guidance);
+    } catch (error) {
+      setAiGuidance(error instanceof Error ? error.message : 'Asistente no disponible');
+    } finally { setAiLoading(false); }
+  }
+
   const riskColor = risk.level === 'extremo' ? '#b92e20' : risk.level === 'alto' ? '#d95424' : risk.level === 'moderado' ? '#d89918' : '#147355';
 
   return <div className="app-shell">
@@ -192,6 +216,7 @@ export default function App() {
           <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
           {risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
+          <button className="ai-button" onClick={explainRisk}><Bot size={17}/> Explicar esta situación con IA</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
@@ -226,6 +251,7 @@ export default function App() {
     </main>
 
     {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
-    {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2>Activa avisos locales</h2><p>METEO mostrará una notificación si detecta riesgo alto cerca de tu ubicación mientras la aplicación esté abierta. Todavía no sustituye ES‑Alert ni funciona como servicio remoto 24/7.</p><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></form></div>}
+    {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2>Activa avisos de proximidad</h2><p>METEO registrará este dispositivo para comprobar cada 15 minutos si existe una detección de alta confianza en un radio de 25 km. Es un canal complementario y no sustituye ES‑Alert ni a las autoridades.</p><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></form></div>}
+    {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2>Explicación de seguridad</h2>{aiLoading ? <p>Analizando los datos visibles…</p> : <div className="ai-answer">{aiGuidance}</div>}<small>Groq · Apoyo informativo. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
   </div>;
 }
