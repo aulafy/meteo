@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import { AlertTriangle, Bell, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Navigation, Radio, Route, ShieldCheck, TestTube2, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { DEMO_CENTER, demoFires, safePlaces } from './data';
-import { assessRisk, chooseSafePlace, getDownwindLocation, getRoute, getWeather } from './services';
+import { assessRisk, chooseSafePlace, getDownwindLocation, getRoute, getWeather, rankFiresByDistance } from './services';
 import type { Coordinates, Fire, RiskAssessment, SafePlace, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
@@ -16,7 +16,7 @@ export default function App() {
   const [route, setRoute] = useState<Coordinates[]>([]);
   const [destination, setDestination] = useState<SafePlace | null>(null);
   const [sharing, setSharing] = useState(true);
-  const [registered, setRegistered] = useState(false);
+  const [registered, setRegistered] = useState(() => typeof Notification !== 'undefined' && Notification.permission === 'granted' && localStorage.getItem('meteo_local_alerts') === 'true');
   const [showRegister, setShowRegister] = useState(false);
   const [toast, setToast] = useState('');
   const [mobilePanel, setMobilePanel] = useState(false);
@@ -24,9 +24,11 @@ export default function App() {
   const [fires, setFires] = useState<Fire[]>(demoFires);
   const [fireMode, setFireMode] = useState<'live' | 'demo'>('demo');
   const firesRef = useRef<Fire[]>(demoFires);
+  const notifiedFireRef = useRef('');
   const [simulatedScenario, setSimulatedScenario] = useState(false);
 
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
+  const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
 
   useEffect(() => { getWeather(location).then(setWeather); }, [location]);
 
@@ -38,6 +40,14 @@ export default function App() {
       setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt));
     }).catch(() => { setFires(demoFires); setFireMode('demo'); });
   }, []);
+
+  useEffect(() => {
+    if (!registered || simulatedScenario || !risk.nearestFire || !['alto', 'extremo'].includes(risk.level) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const notificationKey = `${risk.nearestFire.id}:${risk.level}`;
+    if (notifiedFireRef.current === notificationKey) return;
+    notifiedFireRef.current = notificationKey;
+    new Notification(`METEO · Riesgo ${risk.level}`, { body: `Detección satelital a ${risk.distanceKm.toFixed(1)} km. Consulta 112 y Protección Civil.`, icon: './favicon.svg', tag: notificationKey });
+  }, [registered, simulatedScenario, risk]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setLastSync(new Date()), 60000);
@@ -130,6 +140,16 @@ export default function App() {
     window.setTimeout(() => setToast(''), 4500);
   }
 
+  async function activateLocalAlerts(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (typeof Notification === 'undefined') { setToast('Este navegador no admite notificaciones locales'); return; }
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { setToast('Permiso de notificaciones no concedido'); return; }
+    localStorage.setItem('meteo_local_alerts', 'true');
+    setRegistered(true); setShowRegister(false); setToast('Avisos locales activados mientras METEO esté abierto');
+    window.setTimeout(() => setToast(''), 4000);
+  }
+
   const riskColor = risk.level === 'extremo' ? '#b92e20' : risk.level === 'alto' ? '#d95424' : risk.level === 'moderado' ? '#d89918' : '#147355';
 
   return <div className="app-shell">
@@ -156,8 +176,8 @@ export default function App() {
         <section className="panel-section">
           <div className="section-title"><div><h2>Incendios cercanos</h2><span>{fireMode === 'live' ? 'NASA FIRMS' : 'MODO DEMO'} · {lastSync.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
           {fires.length === 0 && <p className="route-copy">Sin detecciones satelitales recientes en España.</p>}
-          {fires.slice(0,3).map((fire, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
-            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source} · {fire.intensity}% índice térmico</small></div><strong>{fire.frp != null ? `${fire.frp.toFixed(1)} MW` : `${risk.distanceKm.toFixed(1)} km`}</strong><ChevronRight size={17}/>
+          {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
+            <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''}</small></div><strong>{distanceKm.toFixed(1)} km</strong><ChevronRight size={17}/>
           </button>)}
         </section>
 
@@ -184,6 +204,6 @@ export default function App() {
     </main>
 
     {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
-    {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" onClick={(e)=>e.stopPropagation()} onSubmit={(e)=>{e.preventDefault();setRegistered(true);setShowRegister(false);setToast('Alertas activadas para este dispositivo');setTimeout(()=>setToast(''),3500)}}><button type="button" className="modal-x" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2>Activa las alertas cercanas</h2><p>Te avisaremos si un incendio entra en tu radio de seguridad. Tu ubicación solo se usa para calcular proximidad.</p><label>Nombre<input required placeholder="Tu nombre"/></label><label>Teléfono o correo<input required type="text" placeholder="Para recibir avisos"/></label><label className="consent"><input required type="checkbox"/> Acepto compartir mi ubicación mientras las alertas estén activas.</label><button className="primary" type="submit">Activar alertas</button></form></div>}
+    {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2>Activa avisos locales</h2><p>METEO mostrará una notificación si detecta riesgo alto cerca de tu ubicación mientras la aplicación esté abierta. Todavía no sustituye ES‑Alert ni funciona como servicio remoto 24/7.</p><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></form></div>}
   </div>;
 }
