@@ -1,7 +1,7 @@
 import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
-import type { AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, RiskLevel, Weather } from './types';
+import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, RiskLevel, Weather } from './types';
 
 export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
   try {
@@ -27,7 +27,11 @@ export async function getHourlyForecast([lng, lat]: Coordinates): Promise<Hourly
   try {
     const response = await fetch(url); if (!response.ok) throw new Error('forecast');
     const { hourly } = await response.json();
-    return hourly.time.map((time: string, index: number) => ({ time, temperature: hourly.temperature_2m[index], humidity: hourly.relative_humidity_2m[index], precipitationProbability: hourly.precipitation_probability[index], windSpeed: hourly.wind_speed_10m[index], windGusts: hourly.wind_gusts_10m[index], windDirection: hourly.wind_direction_10m[index] }));
+    return hourly.time.map((time: string, index: number) => {
+      const wind = hourly.wind_speed_10m[index]; const gust = hourly.wind_gusts_10m[index]; const humidity = hourly.relative_humidity_2m[index];
+      const danger = gust >= 50 || (wind >= 30 && humidity <= 30) ? 'alto' : gust >= 30 || wind >= 20 || humidity <= 35 ? 'moderado' : 'bajo';
+      return { time, temperature: hourly.temperature_2m[index], humidity, precipitationProbability: hourly.precipitation_probability[index], windSpeed: wind, windGusts: gust, windDirection: hourly.wind_direction_10m[index], danger };
+    });
   } catch { return []; }
 }
 
@@ -40,7 +44,7 @@ export async function getAirQuality([lng, lat]: Coordinates): Promise<AirQuality
 }
 
 export function assessRisk(location: Coordinates, fires: Fire[], weather: Weather): RiskAssessment {
-  if (!fires.length) return { score: 0, level: 'bajo', distanceKm: Infinity, reasons: ['No hay detecciones satelitales recientes en España'], etaMinutes: 0 };
+  if (!fires.length) return { score: 0, level: 'bajo', distanceKm: Infinity, reasons: ['No hay detecciones satelitales recientes en España'], etaMinutes: 0, isDownwind: false };
   const ranked = fires.map((fire) => ({ fire, km: distance(point(location), point(fire.coordinates), { units: 'kilometers' }) })).sort((a, b) => a.km - b.km);
   const nearest = ranked[0];
   const proximity = Math.max(0, 100 - nearest.km * 7);
@@ -65,7 +69,18 @@ export function assessRisk(location: Coordinates, fires: Fire[], weather: Weathe
   ];
   const ageHours = Math.max(0, (Date.now() - new Date(nearest.fire.detectedAt).getTime()) / 3600000);
   reasons.push(`Última observación satelital hace ${ageHours < 1 ? '<1' : Math.round(ageHours)} h`);
-  return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: Math.max(5, Math.round(nearest.km * 2.6)) };
+  return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: 0, isDownwind };
+}
+
+export function getActionGuidance(risk: RiskAssessment): ActionGuidance {
+  if (risk.level === 'extremo') return { urgency: 'critica', title: 'Atención inmediata', message: risk.isDownwind ? 'La detección está próxima y el viento puede transportar humo y pavesas hacia tu zona.' : 'La combinación de proximidad e intensidad requiere vigilancia inmediata.', steps: ['Comprueba ahora ES‑Alert, 112 y Protección Civil.', 'Reúne a tu hogar y prepara una salida rápida si la ordenan.', 'Ante humo denso, llamas o peligro inmediato, llama al 112.'] };
+  if (risk.level === 'alto') return { urgency: 'alta', title: risk.isDownwind ? 'Viento hacia tu zona' : 'Riesgo alto cercano', message: 'No esperes a ver llamas para preparar documentación, medicación, dependientes y animales.', steps: ['Mantén móvil y radio con sonido.', 'Revisa los accesos oficiales y el estado de la DGT.', 'No inicies una evacuación por una ruta no confirmada.'] };
+  if (risk.level === 'moderado') return { urgency: 'atencion', title: 'Mantente preparado', message: 'La situación no implica una orden de evacuación, pero puede cambiar con el viento.', steps: ['Consulta canales oficiales periódicamente.', 'Carga el móvil y prepara los elementos esenciales.', 'Cierra ventanas si aparece humo.'] };
+  return { urgency: 'informativa', title: 'Vigilancia activa', message: 'No se aprecia una combinación de proximidad y condiciones que eleve el riesgo ahora.', steps: ['Mantén activadas las alertas.', 'Sigue siempre las instrucciones oficiales.'] };
+}
+
+export function windDirectionToCardinal(degrees: number) {
+  return ['N','NE','E','SE','S','SO','O','NO'][Math.round(((degrees % 360) / 45)) % 8];
 }
 
 export function rankFiresByDistance(location: Coordinates, fires: Fire[]) {

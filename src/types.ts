@@ -29,6 +29,7 @@ export interface HourlyForecast {
   windGusts: number;
   windDirection: number;
   precipitationProbability: number;
+  danger: 'bajo' | 'moderado' | 'alto';
 }
 
 export interface AirQuality {
@@ -46,4 +47,12 @@ export interface RiskAssessment {
   distanceKm: number;
   reasons: string[];
   etaMinutes: number;
+  isDownwind: boolean;
+}
+
+export interface ActionGuidance {
+  urgency: 'informativa' | 'atencion' | 'alta' | 'critica';
+  title: string;
+  message: string;
+  steps: string[];
 }

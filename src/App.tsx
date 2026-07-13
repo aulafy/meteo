@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
-import { assessRisk, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance } from './services';
+import { assessRisk, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance, windDirectionToCardinal } from './services';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, RiskAssessment, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
@@ -34,6 +34,7 @@ export default function App() {
 
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
+  const actionGuidance = useMemo(() => getActionGuidance(risk), [risk]);
 
   useEffect(() => { getWeather(location).then(setWeather); getHourlyForecast(location).then(setHourly); getAirQuality(location).then(setAirQuality); }, [location]);
 
@@ -79,7 +80,7 @@ export default function App() {
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
       map.on('click', 'fire-points', (e) => {
         const p = e.features?.[0]?.properties;
-        if (p) new maplibregl.Popup({ offset: 16 }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br/>Intensidad ${p.intensity}% · Confianza ${p.confidence}%<br/><small>Fuente ${p.source}</small>`).addTo(map);
+        if (p) new maplibregl.Popup({ offset: 16 }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br/>Anomalía térmica no confirmada<br/>Confianza ${p.confidence}% · FRP ${p.frp ? Number(p.frp).toFixed(1) : '—'} MW<br/><small>Observada ${new Date(p.detectedAt).toLocaleString('es-ES')} · ${p.source}</small>`).addTo(map);
       });
       map.on('mouseenter', 'fire-points', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'fire-points', () => { map.getCanvas().style.cursor = ''; });
@@ -179,6 +180,7 @@ export default function App() {
           <div className="risk-heading"><div><strong>{hasPreciseLocation ? risk.level : 'sin ubicación'}</strong><span>{hasPreciseLocation ? `Índice ${risk.score}/100` : 'Riesgo personal pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasPreciseLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
           <p>{!hasPreciseLocation ? 'La distancia y el nivel personal no son válidos hasta que compartas tu ubicación.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
           {hasPreciseLocation && <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+          {hasPreciseLocation && <div className={`decision-card urgency-${actionGuidance.urgency}`}><small>QUÉ HACER AHORA</small><b>{actionGuidance.title}</b><p>{actionGuidance.message}</p><ol>{actionGuidance.steps.map(step=><li key={step}>{step}</li>)}</ol></div>}
           <div className="chips"><span><Wind size={14}/> {weather.windSpeed.toFixed(0)} km/h</span><span><CloudRain size={14}/> {weather.humidity.toFixed(0)}%</span><span><Thermometer size={14}/> {weather.temperature.toFixed(0)}°</span></div>
           {hasPreciseLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
           <button className="ai-button" disabled={!hasPreciseLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasPreciseLocation ? 'Explicar esta situación con IA' : 'Activa ubicación para explicación personal'}</button>
@@ -203,7 +205,7 @@ export default function App() {
 
         <section className="panel-section">
           <div className="section-title"><div><h2>Próximas 12 horas</h2><span>Pronóstico Open‑Meteo · tecnología MeteoFlow</span></div><Wind size={20}/></div>
-          {hourly.length ? <div className="hourly-forecast">{hourly.filter((_, index) => index % 2 === 0).slice(0,6).map((hour) => <div className="hourly-item" key={hour.time}><small>{new Date(hour.time).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}</small><b>{hour.temperature.toFixed(0)}°</b><span><Wind size={12}/>{hour.windSpeed.toFixed(0)} km/h</span><span>H {hour.humidity.toFixed(0)}%</span></div>)}</div> : <p className="route-copy">Pronóstico no disponible temporalmente.</p>}
+          {hourly.length ? <><div className="forecast-summary">{hourly.some(hour=>hour.danger==='alto') ? '⚠ Se prevén horas con viento/aire seco desfavorables.' : hourly.some(hour=>hour.danger==='moderado') ? 'Vigila cambios de viento y humedad durante las próximas horas.' : 'Sin empeoramiento meteorológico acusado en este horizonte.'}</div><div className="hourly-forecast">{hourly.filter((_, index) => index % 2 === 0).slice(0,6).map((hour) => <div className={`hourly-item danger-${hour.danger}`} key={hour.time}><small>{new Date(hour.time).toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}</small><b>{hour.temperature.toFixed(0)}°</b><span><Wind size={12}/>{hour.windSpeed.toFixed(0)} km/h</span><span>R {hour.windGusts.toFixed(0)} · H {hour.humidity.toFixed(0)}%</span></div>)}</div></> : <p className="route-copy">Pronóstico no disponible temporalmente.</p>}
         </section>
 
         <section className="sharing">
@@ -214,6 +216,7 @@ export default function App() {
 
       <section className="map-wrap">
         <div ref={mapContainer} className="map" />
+        <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>
         <div className="map-tools"><button onClick={locate} title="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()}>+</button><button onClick={() => mapRef.current?.zoomOut()}>−</button></div>
         <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> Tu ubicación</span></div>
         <div className="weather-strip"><div><Wind/><span><small>VIENTO</small><b>{weather.windSpeed.toFixed(0)} km/h · {weather.windDirection.toFixed(0)}°</b></span></div><div><CloudRain/><span><small>HUMEDAD</small><b>{weather.humidity.toFixed(0)}%</b></span></div><div><Thermometer/><span><small>TEMPERATURA</small><b>{weather.temperature.toFixed(0)}°C</b></span></div><em>{weather.label}</em></div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRisk, rankFiresByDistance } from './services';
+import { assessRisk, getActionGuidance, rankFiresByDistance, windDirectionToCardinal } from './services';
 import type { Fire } from './types';
 
 const fires: Fire[] = [
@@ -23,5 +23,15 @@ describe('motor de seguridad', () => {
     const ordered = rankFiresByDistance(fires[0].coordinates, [fires[1], fires[0]]);
     expect(ordered[0].fire.id).toBe(fires[0].id);
     expect(ordered[0].distanceKm).toBe(0);
+  });
+  it('da instrucciones críticas sin inventar una ruta', () => {
+    const guidance = getActionGuidance({ score: 82, level: 'extremo', nearestFire: fires[0], distanceKm: 3, reasons: [], etaMinutes: 0, isDownwind: true });
+    expect(guidance.urgency).toBe('critica');
+    expect(guidance.steps.join(' ')).toContain('112');
+    expect(guidance.steps.join(' ').toLowerCase()).not.toContain('ruta recomendada');
+  });
+  it('traduce la dirección del viento a puntos cardinales', () => {
+    expect(windDirectionToCardinal(90)).toBe('E');
+    expect(windDirectionToCardinal(225)).toBe('SO');
   });
 });
