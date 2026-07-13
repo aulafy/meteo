@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRisk, chooseSafePlace } from './services';
+import { assessRisk, chooseSafePlace, getDownwindLocation } from './services';
 import { demoFires, safePlaces } from './data';
 
 describe('motor de seguridad', () => {
@@ -18,6 +18,13 @@ describe('motor de seguridad', () => {
     const assessment = assessRisk([-7.88445, 42.33587], [fire], weather);
     expect(assessment.distanceKm).toBeLessThan(5.5);
     expect(['alto', 'extremo']).toContain(assessment.level);
+    expect(assessment.reasons).toContain('Tu ubicación está a sotavento de la detección');
+  });
+  it('sitúa el escenario de ensayo a cinco kilómetros a sotavento', () => {
+    const fire: [number, number] = [-7.9433, 42.34381];
+    const resident = getDownwindLocation(fire, 281, 5);
+    const assessment = assessRisk(resident, [{ ...demoFires[0], coordinates: fire, confidence: 70 }], { temperature: 22, humidity: 60, windSpeed: 10, windDirection: 281, precipitation: 0, label: 'test' });
+    expect(assessment.distanceKm).toBeCloseTo(5, 1);
     expect(assessment.reasons).toContain('Tu ubicación está a sotavento de la detección');
   });
 });
