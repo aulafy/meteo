@@ -1,12 +1,16 @@
-const CACHE = 'meteo-shell-v2';
+const CACHE = 'meteo-shell-v3';
 const SHELL = ['./', './manifest.webmanifest', './favicon.svg'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))).then(() => self.clients.claim())));
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.pathname.includes('/api/') || url.pathname.endsWith('/fires.json')) {
+  if (url.pathname.endsWith('/fires.json')) {
     event.respondWith(fetch(event.request).then((response) => { if (response.ok) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone())); return response; }).catch(() => caches.match(event.request).then((cached) => cached || new Response(JSON.stringify({ error: 'Sin conexión y sin datos guardados' }), { status: 503, headers: { 'Content-Type': 'application/json' } }))));
+    return;
+  }
+  if (url.pathname.includes('/api/')) {
+    event.respondWith(fetch(event.request).catch(() => new Response(JSON.stringify({ error: 'Sin conexión' }), { status: 503, headers: { 'Content-Type': 'application/json' } })));
     return;
   }
   event.respondWith(fetch(event.request).then((response) => { if (response.ok && url.origin === self.location.origin) caches.open(CACHE).then((cache) => cache.put(event.request, response.clone())); return response; }).catch(() => caches.match(event.request).then((cached) => cached || caches.match('./'))));

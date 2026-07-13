@@ -8,6 +8,7 @@ const inputSchema = z.object({
   confidence: z.number().min(0).max(100).nullable(),
   frp: z.number().nonnegative().nullable(),
   weather: z.object({
+    available: z.boolean(),
     temperature: z.number(),
     humidity: z.number().min(0).max(100),
     windSpeed: z.number().nonnegative(),
@@ -33,7 +34,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
         messages: [
           {
             role: 'system',
-            content: 'Eres el asistente de seguridad de METEO para incendios forestales en España. Responde en español claro, breve y accionable. Usa exclusivamente los datos suministrados. Una detección NASA FIRMS es una anomalía térmica, no un incendio confirmado. No inventes carreteras, perímetros, refugios, tiempos de llegada ni órdenes de evacuación. No contradigas a 112, ES-Alert, Protección Civil, bomberos o policía. Estructura la respuesta con: Situación, Qué hacer ahora, Qué no sabemos. Si el riesgo es alto o extremo, indica llamar al 112 ante peligro inmediato y seguir canales oficiales.',
+            content: 'Eres el asistente de seguridad de METEO para incendios forestales en España. Responde en español claro, breve y accionable, sin Markdown, asteriscos ni encabezados decorativos. Usa exclusivamente los datos suministrados. Si weather.available es false, trata todos sus valores numéricos como ausentes y dilo claramente. Una detección NASA FIRMS es una anomalía térmica, no un incendio confirmado. No inventes carreteras, perímetros, refugios, tiempos de llegada ni órdenes de evacuación. No contradigas a 112, ES-Alert, Protección Civil, bomberos o policía. Estructura la respuesta con: Situación, Qué hacer ahora, Qué no sabemos. Si el riesgo es alto o extremo, indica llamar al 112 ante peligro inmediato y seguir canales oficiales.',
           },
           { role: 'user', content: JSON.stringify(situation) },
         ],

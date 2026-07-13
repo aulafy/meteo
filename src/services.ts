@@ -3,6 +3,23 @@ import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
 import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, RiskLevel, Weather } from './types';
 
+export const ACTIONABLE_FIRE_MAX_AGE_HOURS = 12;
+export const ACTIONABLE_FIRE_MIN_CONFIDENCE = 70;
+
+export function isActionableFire(fire: Fire, now = Date.now()) {
+  const detectedAt = Date.parse(fire.detectedAt);
+  return fire.confidence >= ACTIONABLE_FIRE_MIN_CONFIDENCE
+    && Number.isFinite(detectedAt)
+    && detectedAt <= now
+    && now - detectedAt <= ACTIONABLE_FIRE_MAX_AGE_HOURS * 3600000;
+}
+
+export function fireAgeLabel(detectedAt: string, now = Date.now()) {
+  const ageHours = Math.max(0, (now - Date.parse(detectedAt)) / 3600000);
+  if (ageHours < 1) return 'hace <1 h';
+  return `hace ${Math.floor(ageHours)} h`;
+}
+
 export function parseFireFeed(input: unknown) {
   const feed = input as { generatedAt?: unknown; fires?: unknown };
   if (!feed || typeof feed.generatedAt !== 'string' || !Number.isFinite(Date.parse(feed.generatedAt)) || !Array.isArray(feed.fires) || feed.fires.length > 10000) throw new Error('Feed FIRMS inválido');
@@ -25,9 +42,11 @@ export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
     const res = await fetch(url);
     if (!res.ok) throw new Error('weather');
     const { current } = await res.json();
-    return { temperature: current.temperature_2m, humidity: current.relative_humidity_2m, windSpeed: current.wind_speed_10m, windGusts: current.wind_gusts_10m, windDirection: current.wind_direction_10m, precipitation: current.precipitation, label: 'Open‑Meteo · ahora' };
+    const values = [current.temperature_2m, current.relative_humidity_2m, current.wind_speed_10m, current.wind_direction_10m, current.precipitation];
+    if (!values.every(Number.isFinite)) throw new Error('weather');
+    return { available: true, temperature: current.temperature_2m, humidity: current.relative_humidity_2m, windSpeed: current.wind_speed_10m, windGusts: current.wind_gusts_10m, windDirection: current.wind_direction_10m, precipitation: current.precipitation, label: 'Open‑Meteo · ahora' };
   } catch {
-    return { temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Meteorología no disponible' };
+    return { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Meteorología no disponible' };
   }
 }
 
@@ -62,36 +81,39 @@ export async function searchSpanishLocations(query: string): Promise<LocationRes
     url.searchParams.set('name', query.trim()); url.searchParams.set('count', '8'); url.searchParams.set('language', 'es'); url.searchParams.set('format', 'json'); url.searchParams.set('countryCode', 'ES');
     const response = await fetch(url); if (!response.ok) throw new Error('geocoding');
     const data = await response.json();
-    return (data.results ?? []).filter((item: any) => item.country_code === 'ES').map((item: any) => ({ name: item.name, region: item.admin1 || item.admin2 || '', country: item.country || 'España', coordinates: [item.longitude, item.latitude] as Coordinates }));
+    type GeocodingResult = { name: string; admin1?: string; admin2?: string; country?: string; country_code?: string; longitude: number; latitude: number };
+    return ((data.results ?? []) as GeocodingResult[]).filter((item) => item.country_code === 'ES').map((item) => ({ name: item.name, region: item.admin1 || item.admin2 || '', country: item.country || 'España', coordinates: [item.longitude, item.latitude] as Coordinates }));
   } catch { return []; }
 }
 
 export function assessRisk(location: Coordinates, fires: Fire[], weather: Weather): RiskAssessment {
-  if (!fires.length) return { score: 0, level: 'bajo', distanceKm: Infinity, reasons: ['No hay detecciones satelitales recientes en España'], etaMinutes: 0, isDownwind: false };
-  const ranked = fires.map((fire) => ({ fire, km: distance(point(location), point(fire.coordinates), { units: 'kilometers' }) })).sort((a, b) => a.km - b.km);
+  const actionableFires = fires.filter((fire) => isActionableFire(fire));
+  if (!actionableFires.length) return { score: 0, level: 'bajo', distanceKm: Infinity, reasons: ['No hay detecciones de confianza ≥70% observadas en las últimas 12 h'], etaMinutes: 0, isDownwind: false };
+  const ranked = actionableFires.map((fire) => ({ fire, km: distance(point(location), point(fire.coordinates), { units: 'kilometers' }) })).sort((a, b) => a.km - b.km);
   const nearest = ranked[0];
+  const weatherAvailable = weather.available !== false;
   const proximity = Math.max(0, 100 - nearest.km * 7);
-  const dryness = Math.max(0, 70 - weather.humidity) * 0.75;
-  const heat = Math.max(0, weather.temperature - 20) * 1.35;
-  const wind = Math.min(35, weather.windSpeed * 0.85);
+  const dryness = weatherAvailable ? Math.max(0, 70 - weather.humidity) * 0.75 : 0;
+  const heat = weatherAvailable ? Math.max(0, weather.temperature - 20) * 1.35 : 0;
+  const wind = weatherAvailable ? Math.min(35, weather.windSpeed * 0.85) : 0;
   const intensity = nearest.fire.intensity * 0.45;
   const fireToResident = (bearing(point(nearest.fire.coordinates), point(location)) + 360) % 360;
   const downwindDirection = (weather.windDirection + 180) % 360;
   const angleDifference = Math.abs(((fireToResident - downwindDirection + 540) % 360) - 180);
-  const isDownwind = angleDifference <= 45;
+  const isDownwind = weatherAvailable && angleDifference <= 45;
   const downwindPenalty = isDownwind ? Math.min(18, 5 + weather.windSpeed * 0.45) : 0;
   let score = Math.round(Math.min(100, proximity * 0.36 + dryness * 0.18 + heat * 0.14 + wind * 0.14 + intensity * 0.18 + downwindPenalty));
   if (nearest.km <= 5.5 && nearest.fire.confidence >= 70) score = Math.max(score, 65);
   else if (nearest.km <= 10 && nearest.fire.confidence >= 70) score = Math.max(score, isDownwind ? 60 : 50);
   const level: RiskLevel = score >= 75 ? 'extremo' : score >= 55 ? 'alto' : score >= 30 ? 'moderado' : 'bajo';
   const reasons = [
-    `Foco activo a ${nearest.km.toFixed(1)} km`,
+    `Anomalía térmica reciente a ${nearest.km.toFixed(1)} km`,
     ...(isDownwind ? ['Tu ubicación está a sotavento de la detección'] : []),
-    weather.windSpeed > 25 ? `Rachas de ${weather.windSpeed.toFixed(0)} km/h favorecen la propagación` : `Viento de ${weather.windSpeed.toFixed(0)} km/h`,
-    weather.humidity < 30 ? `Humedad crítica del ${weather.humidity.toFixed(0)}%` : `Humedad del ${weather.humidity.toFixed(0)}%`,
+    ...(weatherAvailable ? [weather.windSpeed > 25 ? `Viento de ${weather.windSpeed.toFixed(0)} km/h favorece la propagación` : `Viento de ${weather.windSpeed.toFixed(0)} km/h`] : [weather.label.startsWith('Cargando') ? 'Meteorología cargando; evaluación provisional' : 'Meteorología no disponible; evaluación incompleta']),
+    ...(weatherAvailable ? [weather.humidity < 30 ? `Humedad crítica del ${weather.humidity.toFixed(0)}%` : `Humedad del ${weather.humidity.toFixed(0)}%`] : []),
   ];
   const ageHours = Math.max(0, (Date.now() - new Date(nearest.fire.detectedAt).getTime()) / 3600000);
-  reasons.push(`Última observación satelital hace ${ageHours < 1 ? '<1' : Math.round(ageHours)} h`);
+  reasons.push(`Última observación satelital hace ${ageHours < 1 ? '<1' : Math.floor(ageHours)} h`);
   return { score, level, nearestFire: nearest.fire, distanceKm: nearest.km, reasons, etaMinutes: 0, isDownwind };
 }
 

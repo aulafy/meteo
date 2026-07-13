@@ -6,7 +6,7 @@ const subscriptionSchema = z.object({
   subscription: z.object({
     endpoint: z.string().url().max(2048),
     expirationTime: z.number().nullable().optional(),
-    keys: z.object({ p256dh: z.string().min(20), auth: z.string().min(8) }),
+    keys: z.object({ p256dh: z.string().min(20).max(256), auth: z.string().min(8).max(128) }),
   }),
   latitude: z.number().min(35).max(44),
   longitude: z.number().min(-10).max(5),

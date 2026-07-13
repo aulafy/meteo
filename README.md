@@ -1,6 +1,6 @@
 # METEO
 
-Aplicación web de inteligencia meteorológica, detección temprana de incendios, riesgo ambiental, rutas de evacuación y alertas por proximidad. Sigue el stack geoespacial web de [GeoLibre](https://github.com/opengeos/GeoLibre): React, TypeScript, MapLibre GL y capas GeoJSON.
+Aplicación web de inteligencia meteorológica, detección temprana de incendios, orientación para residentes y alertas por proximidad. Sigue el stack geoespacial web de [GeoLibre](https://github.com/opengeos/GeoLibre): React, TypeScript, MapLibre GL y capas GeoJSON.
 
 ## Arranque
 
@@ -16,6 +16,8 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 - Meteorología actual, pronóstico horario y calidad del aire: Open-Meteo.
 - Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
 - Cartografía: OpenFreeMap/MapLibre.
+
+El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
 
 ## Integración con MeteoFlow
 
@@ -35,9 +37,11 @@ El directorio `api/` contiene funciones Vercel para suscribir dispositivos y eva
 
 El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Solo envía detecciones FIRMS con confianza mínima del 70%, observadas durante las últimas 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
 
+La persona puede desactivar los avisos desde la propia app; esto elimina la suscripción y su ubicación. Como límite adicional, el evaluador elimina automáticamente suscripciones que lleven 180 días sin renovarse y registros de entrega con más de 365 días.
+
 ## Arquitectura de producción recomendada
 
-El cliente nunca debería decidir por sí solo una evacuación real. Un backend debe ingerir NASA FIRMS y fuentes oficiales regionales, normalizar focos en PostGIS, calcular corredores con una red vial y polígonos de propagación, y enviar notificaciones mediante Web Push/SMS. La ruta mostrada debe identificarse siempre como recomendación complementaria a Protección Civil y 112.
+El cliente nunca debería decidir por sí solo una evacuación real. Un backend debe ingerir NASA FIRMS y fuentes oficiales regionales, normalizar focos en PostGIS, calcular corredores con una red vial y polígonos de propagación, y enviar notificaciones mediante Web Push/SMS. Cualquier futura ruta debe identificarse siempre como recomendación complementaria a Protección Civil y 112.
 
 ## Aviso
 

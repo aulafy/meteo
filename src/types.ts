@@ -12,6 +12,7 @@ export interface Fire {
 }
 
 export interface Weather {
+  available: boolean;
   temperature: number;
   humidity: number;
   windSpeed: number;
