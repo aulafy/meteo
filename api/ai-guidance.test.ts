@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AI_SYSTEM_PROMPT } from './ai-guidance';
+import { AI_SYSTEM_PROMPT } from './ai-guidance.js';
 
 describe('prompt de situación', () => {
   it('prohíbe inventar rutas y cortes', () => {

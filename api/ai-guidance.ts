@@ -82,7 +82,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       ? 'Ruta: hay una ruta local de referencia, pero no está verificada y no debe usarse como orden de evacuación.'
       : 'Ruta: METEO no dispone de una ruta de evacuación oficial o verificada.';
     const trafficStatus = situation.traffic.available
-      ? `DGT: datos consultados (${situation.traffic.coverage}); ${situation.traffic.incidents.length ? `${situation.traffic.incidents.length} afecciones cercanas incluidas` : 'sin afecciones cercanas en la selección recibida, lo que no garantiza que todas las vías estén abiertas'}.`
+      ? `DGT: datos consultados (${situation.traffic.coverage}); ${situation.traffic.incidents.length ? `${situation.traffic.incidents.length} ${situation.traffic.incidents.length === 1 ? 'afección cercana incluida' : 'afecciones cercanas incluidas'}` : 'sin afecciones cercanas en la selección recibida, lo que no garantiza que todas las vías estén abiertas'}.`
       : 'DGT: información no disponible temporalmente; METEO no puede confirmar qué carreteras están abiertas.';
     const guidance = `${routeStatus}\n${trafficStatus}\n\n${cleanedGuidance}`;
     return json(response, { guidance, model: 'Groq', disclaimer: 'Apoyo informativo; no sustituye a 112 ni a las autoridades.' });
