@@ -44,7 +44,11 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const result = await groqResponse.json() as { choices?: Array<{ message?: { content?: string } }> };
     const rawGuidance = result.choices?.[0]?.message?.content?.trim();
     if (!rawGuidance) throw new Error('Respuesta vacía');
-    const guidance = rawGuidance.replace(/\*\*/g, '').replace(/^\s*\*\s+/gm, '• ');
+    const guidance = rawGuidance
+      .replace(/\*\*/g, '')
+      .replace(/^\s*\*\s+/gm, '• ')
+      .replace(/nivel de riesgo de incendio forestal/gi, 'nivel orientativo de METEO')
+      .replace(/riesgo de incendio forestal/gi, 'nivel orientativo de METEO');
     return json(response, { guidance, model: 'Groq', disclaimer: 'Apoyo informativo; no sustituye a 112 ni a las autoridades.' });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 502;
