@@ -1,7 +1,7 @@
 import distance from '@turf/distance';
 import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
-import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, RiskLevel, Weather } from './types';
+import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, RiskLevel, TrafficIncident, Weather } from './types';
 
 export const ACTIONABLE_FIRE_MAX_AGE_HOURS = 12;
 export const ACTIONABLE_FIRE_MIN_CONFIDENCE = 70;
@@ -30,6 +30,44 @@ export function parseFireFeed(input: unknown) {
     return fire as Fire;
   });
   return { generatedAt: feed.generatedAt, fires };
+}
+
+export function parseTrafficFeed(input: unknown) {
+  const feed = input as { source?: unknown; publishedAt?: unknown; coverage?: unknown; incidents?: unknown };
+  if (feed?.source !== 'DGT DATEX II v3.7' || typeof feed.publishedAt !== 'string' || !Number.isFinite(Date.parse(feed.publishedAt)) || typeof feed.coverage !== 'string' || !Array.isArray(feed.incidents) || feed.incidents.length > 750) throw new Error('Feed DGT inválido');
+  const incidents = feed.incidents.map((value) => {
+    const incident = value as Partial<TrafficIncident>;
+    const validText = [incident.id, incident.road, incident.municipality, incident.province, incident.cause, incident.kind, incident.updatedAt].every((item) => typeof item === 'string' && item.length <= 180);
+    const validCoordinates = Array.isArray(incident.coordinates) && incident.coordinates.length >= 1 && incident.coordinates.length <= 2 && incident.coordinates.every((coordinate) => Array.isArray(coordinate) && coordinate.length === 2 && coordinate.every(Number.isFinite) && coordinate[0] >= -19 && coordinate[0] <= 5 && coordinate[1] >= 27 && coordinate[1] <= 44.5);
+    const validClosure = ['complete', 'carriageway', 'lane', 'intermittent', 'affected'].includes(String(incident.closure));
+    if (!validText || !validCoordinates || !validClosure || typeof incident.fireRelated !== 'boolean' || !incident.id || !incident.road || !Number.isFinite(Date.parse(String(incident.updatedAt)))) throw new Error('Incidencia DGT inválida');
+    return incident as TrafficIncident;
+  });
+  return { source: feed.source, publishedAt: feed.publishedAt, coverage: feed.coverage, incidents };
+}
+
+export function trafficClosureLabel(closure: TrafficIncident['closure']) {
+  if (closure === 'complete') return 'Carretera cortada';
+  if (closure === 'carriageway') return 'Calzada cerrada';
+  if (closure === 'lane') return 'Carril cerrado';
+  if (closure === 'intermittent') return 'Cortes intermitentes';
+  return 'Carretera afectada';
+}
+
+export function trafficCauseLabel(cause: string) {
+  const labels: Record<string, string> = {
+    forestFire: 'Incendio forestal', smokeHazard: 'Humo', vehicleOnFire: 'Vehículo incendiado',
+    roadworks: 'Obras', rockfalls: 'Desprendimientos', avalanches: 'Aludes', flooding: 'Inundación',
+    damagedRoadSurface: 'Calzada dañada', accident: 'Accidente', obstruction: 'Obstáculo',
+  };
+  return labels[cause] || cause.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+}
+
+export function rankTrafficByDistance(location: Coordinates, incidents: TrafficIncident[]) {
+  return incidents.map((incident) => ({
+    incident,
+    distanceKm: Math.min(...incident.coordinates.map((coordinate) => distance(point(location), point(coordinate), { units: 'kilometers' }))),
+  })).sort((a, b) => a.distanceKm - b.distanceKm);
 }
 
 export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {

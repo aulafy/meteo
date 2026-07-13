@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRisk, getActionGuidance, isActionableFire, parseFireFeed, rankFiresByDistance, windDirectionToCardinal } from './services';
+import { assessRisk, getActionGuidance, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, trafficClosureLabel, windDirectionToCardinal } from './services';
 import type { Fire } from './types';
 
 const fires: Fire[] = [
@@ -39,6 +39,13 @@ describe('motor de seguridad', () => {
   });
   it('acepta un feed FIRMS bien formado', () => {
     expect(parseFireFeed({ generatedAt: new Date().toISOString(), fires }).fires).toHaveLength(2);
+  });
+  it('valida y ordena cortes oficiales DGT', () => {
+    const incident = { id: 'DGT:1', road: 'A-1', municipality: 'Madrid', province: 'Madrid', cause: 'forestFire', kind: 'roadClosed', closure: 'complete' as const, fireRelated: true, updatedAt: new Date().toISOString(), coordinates: [[-3.7, 40.4] as [number, number]] };
+    const parsed = parseTrafficFeed({ source: 'DGT DATEX II v3.7', publishedAt: new Date().toISOString(), coverage: 'Red estatal', incidents: [incident] });
+    expect(parsed.incidents).toHaveLength(1);
+    expect(rankTrafficByDistance([-3.71, 40.41], parsed.incidents)[0].distanceKm).toBeLessThan(2);
+    expect(trafficClosureLabel(parsed.incidents[0].closure)).toBe('Carretera cortada');
   });
   it('no usa una detección antigua o de baja confianza para el riesgo personal', () => {
     const weather = { available: true, temperature: 38, humidity: 18, windSpeed: 35, windDirection: 200, precipitation: 0, label: 'fixture' };

@@ -29,9 +29,13 @@ La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón
 
 El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento y exportación GeoJSON sin el GPS del residente. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
 
+## Tráfico oficial DGT
+
+El backend consulta y normaliza el feed oficial [Incidencias DGT DATEX II v3.7](https://nap.dgt.es/es/dataset/incidencias-dgt-datex2-v3-7). METEO dibuja carreteras, calzadas y carriles cerrados, cortes intermitentes e incidencias de fuego/humo, con fuente y actualización visibles. La cobertura estatal excluye Cataluña y País Vasco y no garantiza vías locales o pistas forestales. Consulta los [límites y funcionamiento](docs/dgt-incidents.md).
+
 ## Función de Groq
 
-El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente en una explicación breve: situación, acciones inmediatas y datos desconocidos. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
+El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente y las incidencias DGT cercanas en una explicación breve. Una cabecera determinista indica siempre si existe una ruta verificada y si DGT está disponible. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
 
 ## Despliegue
 

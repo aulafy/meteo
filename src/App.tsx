@@ -2,13 +2,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
-import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, rankFiresByDistance, searchSpanishLocations, windDirectionToCardinal } from './services';
+import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
 import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
-import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, Weather } from './types';
+import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
 const emptyFeatureCollection = { type: 'FeatureCollection' as const, features: [] };
+const trafficFeatureCollection = (incidents: TrafficIncident[]) => ({
+  type: 'FeatureCollection' as const,
+  features: incidents.map((incident) => ({
+    type: 'Feature' as const,
+    properties: { id: incident.id, road: incident.road, municipality: incident.municipality, province: incident.province, cause: incident.cause, kind: incident.kind, closure: incident.closure, fireRelated: incident.fireRelated, updatedAt: incident.updatedAt },
+    geometry: incident.coordinates.length > 1
+      ? { type: 'LineString' as const, coordinates: incident.coordinates }
+      : { type: 'Point' as const, coordinates: incident.coordinates[0] },
+  })),
+});
 const createRouteArrow = () => {
   const canvas = document.createElement('canvas');
   canvas.width = 48; canvas.height = 48;
@@ -45,6 +55,10 @@ export default function App() {
   const [fires, setFires] = useState<Fire[]>([]);
   const [fireMode, setFireMode] = useState<'loading' | 'live' | 'error'>('loading');
   const visibleFiresRef = useRef<Fire[]>([]);
+  const trafficRef = useRef<TrafficIncident[]>([]);
+  const [trafficIncidents, setTrafficIncidents] = useState<TrafficIncident[]>([]);
+  const [trafficMode, setTrafficMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [trafficPublishedAt, setTrafficPublishedAt] = useState<Date | null>(null);
   const notifiedFireRef = useRef('');
   const [aiGuidance, setAiGuidance] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -62,13 +76,21 @@ export default function App() {
   const [terrainEnabled, setTerrainEnabled] = useState(false);
   const [satelliteEnabled, setSatelliteEnabled] = useState(false);
   const [windLayerEnabled, setWindLayerEnabled] = useState(true);
+  const [dgtLayerEnabled, setDgtLayerEnabled] = useState(true);
   const [fireTimeWindow, setFireTimeWindow] = useState<FireTimeWindow>(24);
   const [routeElevation, setRouteElevation] = useState<ElevationProfile | null>(null);
   const [routeElevationLoading, setRouteElevationLoading] = useState(false);
   const [routeElevationError, setRouteElevationError] = useState('');
 
+  const hasSelectedLocation = locationKind !== 'general';
+  const hasPreciseLocation = locationKind === 'gps';
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
+  const nearestTraffic = useMemo(() => rankTrafficByDistance(location, trafficIncidents), [location, trafficIncidents]);
+  const hasSituationContext = Boolean((risk.nearestFire && risk.distanceKm <= 50) || (nearestTraffic[0] && nearestTraffic[0].distanceKm <= 50));
+  const trafficForPanel = useMemo(() => hasSelectedLocation
+    ? nearestTraffic
+    : [...nearestTraffic].sort((a, b) => Number(b.incident.fireRelated) - Number(a.incident.fireRelated) || Number(b.incident.closure === 'complete') - Number(a.incident.closure === 'complete') || Date.parse(b.incident.updatedAt) - Date.parse(a.incident.updatedAt)), [hasSelectedLocation, nearestTraffic]);
   const visibleFires = useMemo(() => filterFiresByWindow(fires, fireTimeWindow, clock), [fires, fireTimeWindow, clock]);
   const routeElevationPolyline = useMemo(() => {
     if (!routeElevation || routeElevation.elevations.length < 2) return '';
@@ -76,11 +98,11 @@ export default function App() {
     return routeElevation.elevations.map((elevation, index) => `${(index / (routeElevation.elevations.length - 1) * 100).toFixed(2)},${(38 - ((elevation - routeElevation.minimum) / range) * 34).toFixed(2)}`).join(' ');
   }, [routeElevation]);
   const actionGuidance = useMemo(() => getActionGuidance(risk), [risk]);
-  const hasSelectedLocation = locationKind !== 'general';
-  const hasPreciseLocation = locationKind === 'gps';
   const feedAgeMinutes = Math.max(0, (clock - lastSync.getTime()) / 60000);
   const feedIsStale = fireMode === 'live' && feedAgeMinutes > 60;
   const feedStatusText = fireMode === 'loading' ? 'cargando…' : fireMode === 'error' && fires.length === 0 ? 'no disponible' : `feed hace ${feedAgeMinutes < 1 ? '<1' : Math.floor(feedAgeMinutes)} min${fireMode === 'error' ? ' · última copia' : feedIsStale ? ' · con retraso' : ''}`;
+  const trafficAgeMinutes = trafficPublishedAt ? Math.max(0, (clock - trafficPublishedAt.getTime()) / 60_000) : Infinity;
+  const trafficStatusText = trafficMode === 'loading' ? 'cargando…' : trafficMode === 'error' ? 'no disponible' : `hace ${trafficAgeMinutes < 1 ? '<1' : Math.floor(trafficAgeMinutes)} min${trafficAgeMinutes > 10 ? ' · con retraso' : ''}`;
 
   useEffect(() => {
     let active = true;
@@ -114,6 +136,21 @@ export default function App() {
     const onVisibility = () => { if (document.visibilityState === 'visible') loadFires(); };
     loadFires();
     const timer = window.setInterval(loadFires, 15 * 60000);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const trafficUrl = import.meta.env.VITE_DGT_URL || '/api/dgt-incidents';
+    const loadTraffic = () => fetch(trafficUrl, { cache: 'no-store' }).then(async (response) => {
+      if (!response.ok) throw new Error('DGT no disponible');
+      const data = parseTrafficFeed(await response.json());
+      if (active) { setTrafficIncidents(data.incidents); setTrafficPublishedAt(new Date(data.publishedAt)); setTrafficMode('live'); }
+    }).catch(() => { if (active) setTrafficMode('error'); });
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadTraffic(); };
+    loadTraffic();
+    const timer = window.setInterval(loadTraffic, 5 * 60_000);
     document.addEventListener('visibilitychange', onVisibility);
     return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
   }, []);
@@ -179,6 +216,9 @@ export default function App() {
       map.addLayer({ id: 'fire-cluster-count', type: 'symbol', source: 'fires', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 }, paint: { 'text-color': '#fff' } });
       map.addLayer({ id: 'fire-glow', type: 'circle', source: 'fires', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': ['interpolate', ['linear'], ['get', 'intensity'], 0, 22, 100, 44], 'circle-color': '#ff6a2a', 'circle-opacity': 0.14, 'circle-blur': 0.6 } });
       map.addLayer({ id: 'fire-points', type: 'circle', source: 'fires', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': 8, 'circle-color': '#ff4d26', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff5ee' } });
+      map.addSource('dgt-incidents', { type: 'geojson', data: trafficFeatureCollection(trafficRef.current) });
+      map.addLayer({ id: 'dgt-incident-lines', type: 'line', source: 'dgt-incidents', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['case', ['==', ['get', 'closure'], 'complete'], '#8f1d1d', ['==', ['get', 'fireRelated'], true], '#e55225', ['==', ['get', 'closure'], 'carriageway'], '#c73d2b', '#d18a1f'], 'line-width': ['case', ['==', ['get', 'closure'], 'complete'], 7, 5], 'line-opacity': 0.92 } });
+      map.addLayer({ id: 'dgt-incident-points', type: 'circle', source: 'dgt-incidents', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': ['case', ['==', ['get', 'closure'], 'complete'], 9, 7], 'circle-color': ['case', ['==', ['get', 'closure'], 'complete'], '#8f1d1d', ['==', ['get', 'fireRelated'], true], '#e55225', '#d18a1f'], 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
       map.addSource('user', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } } });
       map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: { 'circle-radius': 18, 'circle-color': '#147355', 'circle-opacity': 0.16 } });
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
@@ -204,10 +244,26 @@ export default function App() {
         }
       });
       map.on('click', 'fire-clusters', (e) => map.easeTo({ center: e.lngLat, zoom: Math.min(14, map.getZoom() + 2) }));
+      const showTrafficPopup = (e: maplibregl.MapLayerMouseEvent) => {
+        const properties = e.features?.[0]?.properties;
+        if (!properties) return;
+        const content = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = `${trafficClosureLabel(String(properties.closure) as TrafficIncident['closure'])} · ${String(properties.road)}`;
+        const detail = document.createElement('span'); detail.textContent = `${String(properties.municipality || properties.province || 'Ubicación DGT')}\nCausa: ${trafficCauseLabel(String(properties.cause))}${properties.fireRelated ? ' · relacionada con fuego/humo' : ''}`; detail.style.whiteSpace = 'pre-line';
+        const updated = document.createElement('small'); updated.textContent = `DGT · actualizado ${new Date(String(properties.updatedAt)).toLocaleString('es-ES')}`;
+        content.append(title, document.createElement('br'), detail, document.createElement('br'), updated);
+        new maplibregl.Popup({ offset: 14 }).setLngLat(e.lngLat).setDOMContent(content).addTo(map);
+      };
+      map.on('click', 'dgt-incident-lines', showTrafficPopup);
+      map.on('click', 'dgt-incident-points', showTrafficPopup);
       map.on('mouseenter', 'fire-points', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'fire-points', () => { map.getCanvas().style.cursor = ''; });
       map.on('mouseenter', 'fire-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'fire-clusters', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'dgt-incident-lines', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'dgt-incident-lines', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'dgt-incident-points', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'dgt-incident-points', () => { map.getCanvas().style.cursor = ''; });
     });
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -219,6 +275,21 @@ export default function App() {
     if (!map) return;
     (map.getSource('fires') as GeoJSONSource)?.setData({ type: 'FeatureCollection', features: visibleFires.map((fire) => ({ type: 'Feature', properties: fire, geometry: { type: 'Point', coordinates: fire.coordinates } })) });
   }, [visibleFires]);
+
+  useEffect(() => {
+    trafficRef.current = trafficIncidents;
+    const map = mapRef.current;
+    if (!map) return;
+    (map.getSource('dgt-incidents') as GeoJSONSource)?.setData(trafficFeatureCollection(trafficIncidents));
+  }, [trafficIncidents]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer('dgt-incident-lines')) return;
+    const visibility = dgtLayerEnabled ? 'visible' : 'none';
+    map.setLayoutProperty('dgt-incident-lines', 'visibility', visibility);
+    map.setLayoutProperty('dgt-incident-points', 'visibility', visibility);
+  }, [dgtLayerEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -406,6 +477,7 @@ export default function App() {
   function exportVisibleAnalysis() {
     const features = [
       ...visibleFires.map((fire) => ({ type: 'Feature' as const, properties: { ...fire, layer: 'NASA FIRMS', thermalDetection: true }, geometry: { type: 'Point' as const, coordinates: fire.coordinates } })),
+      ...(dgtLayerEnabled ? trafficFeatureCollection(trafficIncidents).features.map((feature) => ({ ...feature, properties: { ...feature.properties, layer: 'DGT DATEX II v3.7' } })) : []),
       ...(referenceRoute?.geojson.features ?? []).map((feature) => ({ ...feature, properties: { ...feature.properties, layer: 'Ruta local no verificada' } })),
     ];
     const payload = {
@@ -415,6 +487,7 @@ export default function App() {
         exportedAt: new Date().toISOString(),
         fireWindowHours: fireTimeWindow,
         firesVisible: visibleFires.length,
+        dgtIncidentsVisible: dgtLayerEnabled ? trafficIncidents.length : 0,
         includesPreciseUserLocation: false,
         warning: 'Las detecciones satelitales no confirman incendios y las rutas locales no están verificadas.',
       },
@@ -437,6 +510,13 @@ export default function App() {
           confidence: risk.nearestFire?.confidence ?? null, frp: risk.nearestFire?.frp != null ? Number(risk.nearestFire.frp.toFixed(1)) : null,
           weather: { available: weather.available, temperature: Number(weather.temperature.toFixed(1)), humidity: Number(weather.humidity.toFixed(0)), windSpeed: Number(weather.windSpeed.toFixed(0)), windDirection: Number(weather.windDirection.toFixed(0)) },
           reasons: risk.reasons,
+          route: { state: referenceRoute ? 'local-reference' : 'none', verified: false },
+          traffic: {
+            available: trafficMode === 'live',
+            publishedAt: trafficPublishedAt?.toISOString() ?? null,
+            coverage: 'Red estatal excepto Cataluña y País Vasco',
+            incidents: nearestTraffic.slice(0, 5).filter((item) => item.distanceKm <= 50).map(({ incident, distanceKm }) => ({ road: incident.road, status: trafficClosureLabel(incident.closure), cause: trafficCauseLabel(incident.cause), municipality: incident.municipality || incident.province, distanceKm: Number(distanceKm.toFixed(1)), updatedAt: incident.updatedAt })),
+          },
         }),
       });
       const data = await response.json() as { guidance?: string; error?: string };
@@ -467,7 +547,8 @@ export default function App() {
           {hasSelectedLocation && <div className={`decision-card urgency-${actionGuidance.urgency}`}><small>{locationKind === 'search' ? 'ORIENTACIÓN PARA ESTA ZONA' : 'QUÉ HACER AHORA'}</small><b>{actionGuidance.title}</b><p>{actionGuidance.message}</p><ol>{actionGuidance.steps.map(step=><li key={step}>{step}</li>)}</ol></div>}
           <div className="chips"><span><Wind size={14}/> {weather.available ? `${weather.windSpeed.toFixed(0)} km/h` : '—'}</span><span><CloudRain size={14}/> {weather.available ? `${weather.humidity.toFixed(0)}%` : '—'}</span><span><Thermometer size={14}/> {weather.available ? `${weather.temperature.toFixed(0)}°` : '—'}</span></div>
           {hasSelectedLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
-          <button className="ai-button" disabled={!hasSelectedLocation || !risk.nearestFire} onClick={explainRisk}><Bot size={17}/> {hasSelectedLocation ? 'Explicar esta situación con IA' : 'Elige una ubicación para obtener contexto'}</button>
+          {hasSelectedLocation && <div className="evacuation-status"><Route/><div><small>RUTA DE EVACUACIÓN</small><b>{referenceRoute ? 'Ruta local visible · no verificada' : 'No hay una ruta oficial disponible'}</b><span>{referenceRoute ? 'No incorpora todos los cortes, perímetros ni órdenes oficiales.' : 'METEO no va a inventar una salida. Sigue ES‑Alert, 112 y a los agentes.'}</span></div></div>}
+          <button className="ai-button" disabled={!hasSelectedLocation || !hasSituationContext} onClick={explainRisk}><Bot size={17}/> {!hasSelectedLocation ? 'Elige una ubicación para obtener contexto' : hasSituationContext ? 'Explicar incendio y carreteras con IA' : 'Sin incidencias cercanas para explicar'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
@@ -477,6 +558,14 @@ export default function App() {
           {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
             <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''} · {fireAgeLabel(fire.detectedAt, clock)}{isActionableFire(fire, clock) ? '' : ' · solo contexto'}</small></div><strong>{hasSelectedLocation ? `${distanceKm.toFixed(1)} km` : 'Ver foco'}</strong><ChevronRight size={17}/>
           </button>)}
+        </section>
+
+        <section className="panel-section traffic-section">
+          <div className="section-title"><div><h2>Carreteras afectadas</h2><span>DGT DATEX II · {trafficStatusText}</span></div><button onClick={() => setShowMapLayers(true)}>Ver capa</button></div>
+          {trafficMode === 'error' && <p className="route-copy">La DGT no está disponible. METEO no puede confirmar qué carreteras están abiertas.</p>}
+          {trafficMode === 'live' && trafficForPanel.length === 0 && <p className="route-copy">Sin cortes en la selección recibida. Esto no garantiza que todas las vías estén abiertas.</p>}
+          {trafficForPanel.slice(0, 4).map(({ incident, distanceKm }) => <button className={`traffic-row closure-${incident.closure}`} key={incident.id} onClick={() => mapRef.current?.flyTo({ center: incident.coordinates[0], zoom: 13 })}><span className="traffic-road">{incident.road}</span><span><b>{trafficClosureLabel(incident.closure)}</b><small>{trafficCauseLabel(incident.cause)} · {incident.municipality || incident.province || 'Red DGT'} · act. {new Date(incident.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</small></span>{hasSelectedLocation && <strong>{distanceKm.toFixed(1)} km</strong>}</button>)}
+          <p className="traffic-coverage">Red estatal excepto Cataluña y País Vasco. No incluye necesariamente calles, caminos forestales ni controles locales.</p>
         </section>
 
         <section className="panel-section resident-section">
@@ -503,8 +592,8 @@ export default function App() {
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>}
         <div className="map-tools"><button className={showMapLayers ? 'active' : ''} aria-expanded={showMapLayers} onClick={() => setShowMapLayers((visible) => !visible)} title="Capas y análisis GeoLibre" aria-label="Capas y análisis GeoLibre"><Layers/></button><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
-        {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa"><div className="map-layer-heading"><div><b>Capas y análisis</b><small>Patrones GeoLibre · MapLibre</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div><label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label><label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label><div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones visibles</div><button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button><p>El filtro temporal, el relieve y la imagen no cambian el riesgo ni constituyen información operativa oficial.</p></section>}
-        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
+        {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa"><div className="map-layer-heading"><div><b>Capas y análisis</b><small>Patrones GeoLibre · MapLibre</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div><label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label><label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label><label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label><div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones · {trafficIncidents.length} afecciones DGT</div><button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button><p>El filtro temporal, el relieve y la imagen no cambian el riesgo. Los datos DGT informan de afecciones; no generan una ruta de evacuación.</p></section>}
+        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
         {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local">
           <div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div>
           <div className="route-playback"><button className="route-play" onClick={toggleRoutePlayback} aria-label={routePlaying ? 'Pausar animación' : 'Reproducir animación'}>{routePlaying ? <Pause/> : <Play/>}</button><label><span>Progreso <b>{Math.round(routeProgress * 100)}%</b></span><input aria-label="Progreso de la ruta" type="range" min="0" max="1" step="0.001" value={routeProgress} onChange={(event) => { setRoutePlaying(false); setRouteProgress(Number(event.target.value)); }}/></label></div>

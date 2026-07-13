@@ -11,6 +11,21 @@ export interface Fire {
   source: 'NASA FIRMS';
 }
 
+export type TrafficClosure = 'complete' | 'carriageway' | 'lane' | 'intermittent' | 'affected';
+
+export interface TrafficIncident {
+  id: string;
+  road: string;
+  municipality: string;
+  province: string;
+  cause: string;
+  kind: string;
+  closure: TrafficClosure;
+  fireRelated: boolean;
+  updatedAt: string;
+  coordinates: Coordinates[];
+}
+
 export interface Weather {
   available: boolean;
   temperature: number;
