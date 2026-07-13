@@ -1,0 +1,1 @@
+{"name":"METEO — Alertas de incendios","short_name":"METEO","description":"Detecciones térmicas, meteorología y alertas por proximidad en España.","start_url":"./","scope":"./","display":"standalone","background_color":"#f7f9f6","theme_color":"#121512","icons":[{"src":"./favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

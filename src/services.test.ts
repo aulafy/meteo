@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRisk, getActionGuidance, rankFiresByDistance, windDirectionToCardinal } from './services';
+import { assessRisk, getActionGuidance, parseFireFeed, rankFiresByDistance, windDirectionToCardinal } from './services';
 import type { Fire } from './types';
 
 const fires: Fire[] = [
@@ -33,5 +33,11 @@ describe('motor de seguridad', () => {
   it('traduce la dirección del viento a puntos cardinales', () => {
     expect(windDirectionToCardinal(90)).toBe('E');
     expect(windDirectionToCardinal(225)).toBe('SO');
+  });
+  it('rechaza un feed FIRMS con coordenadas fuera de España', () => {
+    expect(() => parseFireFeed({ generatedAt: new Date().toISOString(), fires: [{ ...fires[0], coordinates: [20, 50] }] })).toThrow();
+  });
+  it('acepta un feed FIRMS bien formado', () => {
+    expect(parseFireFeed({ generatedAt: new Date().toISOString(), fires }).fires).toHaveLength(2);
   });
 });

@@ -3,6 +3,18 @@ import bearing from '@turf/bearing';
 import { point } from '@turf/helpers';
 import type { ActionGuidance, AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, RiskLevel, Weather } from './types';
 
+export function parseFireFeed(input: unknown) {
+  const feed = input as { generatedAt?: unknown; fires?: unknown };
+  if (!feed || typeof feed.generatedAt !== 'string' || !Number.isFinite(Date.parse(feed.generatedAt)) || !Array.isArray(feed.fires) || feed.fires.length > 10000) throw new Error('Feed FIRMS inválido');
+  const fires = feed.fires.map((value) => {
+    const fire = value as Partial<Fire>;
+    const validCoordinates = Array.isArray(fire.coordinates) && fire.coordinates.length === 2 && fire.coordinates.every(Number.isFinite) && fire.coordinates[0] >= -10 && fire.coordinates[0] <= 5 && fire.coordinates[1] >= 35 && fire.coordinates[1] <= 44;
+    if (!validCoordinates || typeof fire.id !== 'string' || !fire.id || typeof fire.name !== 'string' || fire.name.length > 120 || fire.source !== 'NASA FIRMS' || typeof fire.confidence !== 'number' || fire.confidence < 0 || fire.confidence > 100 || typeof fire.intensity !== 'number' || fire.intensity < 0 || fire.intensity > 100 || typeof fire.detectedAt !== 'string' || !Number.isFinite(Date.parse(fire.detectedAt)) || (fire.frp != null && (typeof fire.frp !== 'number' || fire.frp < 0))) throw new Error('Detección FIRMS inválida');
+    return fire as Fire;
+  });
+  return { generatedAt: feed.generatedAt, fires };
+}
+
 export async function getWeather([lng, lat]: Coordinates): Promise<Weather> {
   try {
     const url = new URL('https://api.open-meteo.com/v1/forecast');

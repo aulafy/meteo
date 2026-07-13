@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, ExternalLink, Flame, LocateFixed, MapPin, Menu, Radio, Search, ShieldCheck, Thermometer, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
-import { assessRisk, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, rankFiresByDistance, searchSpanishLocations, windDirectionToCardinal } from './services';
+import { assessRisk, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, parseFireFeed, rankFiresByDistance, searchSpanishLocations, windDirectionToCardinal } from './services';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, Weather } from './types';
 
 const fallbackWeather: Weather = { temperature: 34, humidity: 24, windSpeed: 28, windDirection: 245, precipitation: 0, label: 'Cargando…' };
@@ -55,7 +55,7 @@ export default function App() {
     const firesUrl = import.meta.env.VITE_FIRES_URL || 'https://aulafy.github.io/meteo/fires.json';
     fetch(firesUrl, { cache: 'no-store' }).then(async (response) => {
       if (!response.ok) throw new Error('FIRMS no disponible');
-      const data = await response.json() as { generatedAt: string; fires: Fire[] };
+      const data = parseFireFeed(await response.json());
       setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt));
     }).catch(() => { setFires([]); setFireMode('error'); });
   }, []);
@@ -85,9 +85,11 @@ export default function App() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'bottom-right');
     map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
     map.on('load', () => {
-      map.addSource('fires', { type: 'geojson', data: { type: 'FeatureCollection', features: firesRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
-      map.addLayer({ id: 'fire-glow', type: 'circle', source: 'fires', paint: { 'circle-radius': ['interpolate', ['linear'], ['get', 'intensity'], 0, 22, 100, 44], 'circle-color': '#ff6a2a', 'circle-opacity': 0.14, 'circle-blur': 0.6 } });
-      map.addLayer({ id: 'fire-points', type: 'circle', source: 'fires', paint: { 'circle-radius': 8, 'circle-color': '#ff4d26', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff5ee' } });
+      map.addSource('fires', { type: 'geojson', cluster: true, clusterMaxZoom: 10, clusterRadius: 45, data: { type: 'FeatureCollection', features: firesRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
+      map.addLayer({ id: 'fire-clusters', type: 'circle', source: 'fires', filter: ['has', 'point_count'], paint: { 'circle-color': ['step', ['get', 'point_count'], '#f59a45', 10, '#ef5a31', 30, '#bd2f20'], 'circle-radius': ['step', ['get', 'point_count'], 17, 10, 23, 30, 29], 'circle-stroke-width': 3, 'circle-stroke-color': '#fff' } });
+      map.addLayer({ id: 'fire-cluster-count', type: 'symbol', source: 'fires', filter: ['has', 'point_count'], layout: { 'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12 }, paint: { 'text-color': '#fff' } });
+      map.addLayer({ id: 'fire-glow', type: 'circle', source: 'fires', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': ['interpolate', ['linear'], ['get', 'intensity'], 0, 22, 100, 44], 'circle-color': '#ff6a2a', 'circle-opacity': 0.14, 'circle-blur': 0.6 } });
+      map.addLayer({ id: 'fire-points', type: 'circle', source: 'fires', filter: ['!', ['has', 'point_count']], paint: { 'circle-radius': 8, 'circle-color': '#ff4d26', 'circle-stroke-width': 3, 'circle-stroke-color': '#fff5ee' } });
       map.addSource('user', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } } });
       map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: { 'circle-radius': 18, 'circle-color': '#147355', 'circle-opacity': 0.16 } });
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
@@ -95,8 +97,11 @@ export default function App() {
         const p = e.features?.[0]?.properties;
         if (p) new maplibregl.Popup({ offset: 16 }).setLngLat(e.lngLat).setHTML(`<strong>${p.name}</strong><br/>Anomalía térmica no confirmada<br/>Confianza ${p.confidence}% · FRP ${p.frp ? Number(p.frp).toFixed(1) : '—'} MW<br/><small>Observada ${new Date(p.detectedAt).toLocaleString('es-ES')} · ${p.source}</small>`).addTo(map);
       });
+      map.on('click', 'fire-clusters', (e) => map.easeTo({ center: e.lngLat, zoom: Math.min(14, map.getZoom() + 2) }));
       map.on('mouseenter', 'fire-points', () => { map.getCanvas().style.cursor = 'pointer'; });
       map.on('mouseleave', 'fire-points', () => { map.getCanvas().style.cursor = ''; });
+      map.on('mouseenter', 'fire-clusters', () => { map.getCanvas().style.cursor = 'pointer'; });
+      map.on('mouseleave', 'fire-clusters', () => { map.getCanvas().style.cursor = ''; });
     });
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -187,13 +192,12 @@ export default function App() {
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>METEO</b><span>Alertas y rutas seguras</span></div></div>
       <div className="live"><span /> {fireMode === 'live' ? 'NASA FIRMS ACTUALIZADO' : fireMode === 'loading' ? 'CARGANDO DATOS' : 'FIRMS NO DISPONIBLE'}</div>
-      <nav><button className="nav-link active">Mapa</button><button className="nav-link">Alertas</button><button className="nav-link">Preparación</button></nav>
-      <div className="top-actions"><button className="icon-button" aria-label="Notificaciones"><Bell size={19}/><i>2</i></button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mi cuenta' : 'Registrarme'}</span></button><button className="mobile-menu" onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>
+      <div className="top-actions"><button className="icon-button" aria-label="Configurar notificaciones" onClick={() => setShowRegister(true)}><Bell size={19}/>{registered && <i aria-hidden="true">✓</i>}</button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mis avisos' : 'Registrarme'}</span></button><button className="mobile-menu" aria-label="Abrir panel de información" aria-expanded={mobilePanel} onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>
     </header>
 
     <main>
       <aside className={`side-panel ${mobilePanel ? 'open' : ''}`}>
-        <button className="panel-close" onClick={() => setMobilePanel(false)}><X/></button>
+        <button className="panel-close" aria-label="Cerrar panel" onClick={() => setMobilePanel(false)}><X/></button>
         <section className="status-card" style={{'--risk': riskColor} as React.CSSProperties}>
           <div className="eyebrow"><Radio size={14}/> {locationKind === 'gps' ? 'RIESGO EN TU UBICACIÓN' : locationKind === 'search' ? `CONSULTA · ${locationLabel}` : 'VISTA GENERAL · ELIGE UNA UBICACIÓN'}</div>
           <div className="risk-heading"><div><strong>{hasSelectedLocation ? risk.level : 'sin ubicación'}</strong><span>{hasSelectedLocation ? `Índice ${risk.score}/100` : 'Riesgo pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasSelectedLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
@@ -237,7 +241,7 @@ export default function App() {
         <div ref={mapContainer} className="map" />
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>
-        <div className="map-tools"><button onClick={locate} title="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()}>+</button><button onClick={() => mapRef.current?.zoomOut()}>−</button></div>
+        <div className="map-tools"><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
         <div className="map-meta"><span><i className="fire-dot"/> Detección térmica FIRMS</span><span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span></div>
         <div className="weather-strip"><div><Wind/><span><small>VIENTO</small><b>{weather.windSpeed.toFixed(0)} km/h · {weather.windDirection.toFixed(0)}°</b></span></div><div><CloudRain/><span><small>HUMEDAD</small><b>{weather.humidity.toFixed(0)}%</b></span></div><div><Thermometer/><span><small>TEMPERATURA</small><b>{weather.temperature.toFixed(0)}°C</b></span></div><em>{weather.label}</em></div>
       </section>
