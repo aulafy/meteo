@@ -15,12 +15,15 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 
 - Meteorología actual, pronóstico horario y calidad del aire: Open-Meteo.
 - Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
+- Actuaciones de vegetación en Cataluña: servicio cartográfico público de Bombers de la Generalitat, consultado cada 2 minutos y mostrado como capa independiente con fase y dotaciones publicadas. Complementa a FIRMS cuando el satélite todavía no observa el foco.
 - Contexto europeo: Copernicus EFFIS mediante su WMS oficial, con índice meteorológico FWI diario y áreas quemadas NRT de la temporada. Estas capas no confirman una emergencia local ni representan un perímetro operativo.
 - Tráfico: incidencias oficiales DGT DATEX II v3.7, normalizadas en el servidor.
 - Terremotos: feed GeoJSON global de USGS de las últimas 24 horas, validado y mostrado como capa independiente desactivada por defecto. No modifica el riesgo de incendio ni se interpreta como alerta de tsunami.
 - Cartografía: OpenFreeMap/MapLibre.
 
 El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. La consulta y el filtro geográfico cubren península, Baleares, Canarias, Ceuta y Melilla. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
+
+Las actuaciones de Bombers no se convierten automáticamente en detecciones FIRMS ni modifican todavía el índice o las notificaciones: el servicio oficial publica ubicación operativa, fase y dotaciones, pero no una intensidad térmica, un perímetro ni una orden de evacuación. Las actuaciones sin fase solo se muestran durante 24 horas desde su última actualización y se rotulan como «Fase no publicada».
 
 ## Integración con MeteoFlow
 
