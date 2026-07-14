@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
+import { Activity, AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
 import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, selectFiresForAi, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
 import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
 import { buildEffisBurnedAreaTileUrl, buildEffisFwiImageUrl, buildEffisLegendUrl, EFFIS_ATTRIBUTION, EFFIS_SPAIN_IMAGE_COORDINATES, EFFIS_VIEWER_URL } from './effis';
+import { addEarthquakeLayers, earthquakeFeatureCollection, setEarthquakeLayerVisibility, updateEarthquakeSource } from './features/earthquakes/map';
+import type { Earthquake } from './features/earthquakes/types';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
@@ -74,6 +76,10 @@ export default function App() {
   const [trafficIncidents, setTrafficIncidents] = useState<TrafficIncident[]>([]);
   const [trafficMode, setTrafficMode] = useState<'loading' | 'live' | 'error'>('loading');
   const [trafficPublishedAt, setTrafficPublishedAt] = useState<Date | null>(null);
+  const earthquakeRef = useRef<Earthquake[]>([]);
+  const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
+  const [earthquakeMode, setEarthquakeMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [earthquakeLastSync, setEarthquakeLastSync] = useState<Date | null>(null);
   const notifiedFireRef = useRef('');
   const [aiGuidance, setAiGuidance] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
@@ -92,6 +98,7 @@ export default function App() {
   const [satelliteEnabled, setSatelliteEnabled] = useState(false);
   const [windLayerEnabled, setWindLayerEnabled] = useState(true);
   const [dgtLayerEnabled, setDgtLayerEnabled] = useState(true);
+  const [earthquakeLayerEnabled, setEarthquakeLayerEnabled] = useState(false);
   const [effisFwiEnabled, setEffisFwiEnabled] = useState(false);
   const [effisBurnedEnabled, setEffisBurnedEnabled] = useState(false);
   const [fireTimeWindow, setFireTimeWindow] = useState<FireTimeWindow>(24);
@@ -105,6 +112,7 @@ export default function App() {
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
   const aiFires = useMemo(() => selectFiresForAi(hasSelectedLocation ? location : null, fires), [fires, hasSelectedLocation, location]);
   const nearestTraffic = useMemo(() => rankTrafficByDistance(location, trafficIncidents), [location, trafficIncidents]);
+  const strongestEarthquake = useMemo(() => earthquakes.reduce<Earthquake | null>((strongest, earthquake) => !strongest || earthquake.magnitude > strongest.magnitude ? earthquake : strongest, null), [earthquakes]);
   const trafficForPanel = useMemo(() => hasSelectedLocation
     ? nearestTraffic
     : [...nearestTraffic].sort((a, b) => Number(b.incident.fireRelated) - Number(a.incident.fireRelated) || Number(b.incident.closure === 'complete') - Number(a.incident.closure === 'complete') || Date.parse(b.incident.updatedAt) - Date.parse(a.incident.updatedAt)), [hasSelectedLocation, nearestTraffic]);
@@ -120,6 +128,8 @@ export default function App() {
   const feedStatusText = fireMode === 'loading' ? 'cargando…' : fireMode === 'error' && fires.length === 0 ? 'no disponible' : `feed hace ${feedAgeMinutes < 1 ? '<1' : Math.floor(feedAgeMinutes)} min${fireMode === 'error' ? ' · última copia' : feedIsStale ? ' · con retraso' : ''}`;
   const trafficAgeMinutes = trafficPublishedAt ? Math.max(0, (clock - trafficPublishedAt.getTime()) / 60_000) : Infinity;
   const trafficStatusText = trafficMode === 'loading' ? 'cargando…' : trafficMode === 'error' ? 'no disponible' : `hace ${trafficAgeMinutes < 1 ? '<1' : Math.floor(trafficAgeMinutes)} min${trafficAgeMinutes > 10 ? ' · con retraso' : ''}`;
+  const earthquakeAgeMinutes = earthquakeLastSync ? Math.max(0, (clock - earthquakeLastSync.getTime()) / 60_000) : Infinity;
+  const earthquakeStatusText = earthquakeMode === 'loading' ? 'cargando…' : earthquakeMode === 'error' ? 'no disponible' : `hace ${earthquakeAgeMinutes < 1 ? '<1' : Math.floor(earthquakeAgeMinutes)} min`;
 
   useEffect(() => {
     let active = true;
@@ -168,6 +178,24 @@ export default function App() {
     const onVisibility = () => { if (document.visibilityState === 'visible') loadTraffic(); };
     loadTraffic();
     const timer = window.setInterval(loadTraffic, 5 * 60_000);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const loadEarthquakes = () => import('./features/earthquakes/service')
+      .then(({ fetchUsgsEarthquakes }) => fetchUsgsEarthquakes())
+      .then((feed) => {
+        if (!active) return;
+        setEarthquakes(feed.earthquakes);
+        setEarthquakeLastSync(new Date(feed.generatedAt));
+        setEarthquakeMode('live');
+      })
+      .catch(() => { if (active) setEarthquakeMode('error'); });
+    const onVisibility = () => { if (document.visibilityState === 'visible') loadEarthquakes(); };
+    loadEarthquakes();
+    const timer = window.setInterval(loadEarthquakes, 5 * 60_000);
     document.addEventListener('visibilitychange', onVisibility);
     return () => { active = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisibility); };
   }, []);
@@ -240,6 +268,7 @@ export default function App() {
       map.addSource('dgt-incidents', { type: 'geojson', data: trafficFeatureCollection(trafficRef.current) });
       map.addLayer({ id: 'dgt-incident-lines', type: 'line', source: 'dgt-incidents', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['case', ['==', ['get', 'closure'], 'complete'], '#8f1d1d', ['==', ['get', 'fireRelated'], true], '#e55225', ['==', ['get', 'closure'], 'carriageway'], '#c73d2b', '#d18a1f'], 'line-width': ['case', ['==', ['get', 'closure'], 'complete'], 7, 5], 'line-opacity': 0.92 } });
       map.addLayer({ id: 'dgt-incident-points', type: 'circle', source: 'dgt-incidents', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': ['case', ['==', ['get', 'closure'], 'complete'], 9, 7], 'circle-color': ['case', ['==', ['get', 'closure'], 'complete'], '#8f1d1d', ['==', ['get', 'fireRelated'], true], '#e55225', '#d18a1f'], 'circle-stroke-width': 3, 'circle-stroke-color': '#ffffff' } });
+      addEarthquakeLayers(map, earthquakeRef.current);
       map.addSource('user', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: location } } });
       map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: { 'circle-radius': 18, 'circle-color': '#147355', 'circle-opacity': 0.16 } });
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
@@ -308,12 +337,25 @@ export default function App() {
   }, [trafficIncidents]);
 
   useEffect(() => {
+    earthquakeRef.current = earthquakes;
+    const map = mapRef.current;
+    if (!map) return;
+    updateEarthquakeSource(map, earthquakes);
+  }, [earthquakes]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map?.getLayer('dgt-incident-lines')) return;
     const visibility = dgtLayerEnabled ? 'visible' : 'none';
     map.setLayoutProperty('dgt-incident-lines', 'visibility', visibility);
     map.setLayoutProperty('dgt-incident-points', 'visibility', visibility);
   }, [dgtLayerEnabled]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    setEarthquakeLayerVisibility(map, earthquakeLayerEnabled);
+  }, [earthquakeLayerEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -514,6 +556,7 @@ export default function App() {
     const features = [
       ...visibleFires.map((fire) => ({ type: 'Feature' as const, properties: { ...fire, layer: 'NASA FIRMS', thermalDetection: true }, geometry: { type: 'Point' as const, coordinates: fire.coordinates } })),
       ...(dgtLayerEnabled ? trafficFeatureCollection(trafficIncidents).features.map((feature) => ({ ...feature, properties: { ...feature.properties, layer: 'DGT DATEX II v3.7' } })) : []),
+      ...(earthquakeLayerEnabled ? earthquakeFeatureCollection(earthquakes).features.map((feature) => ({ ...feature, properties: { ...feature.properties, layer: 'USGS Earthquakes · últimas 24 h' } })) : []),
       ...(referenceRoute?.geojson.features ?? []).map((feature) => ({ ...feature, properties: { ...feature.properties, layer: 'Ruta local no verificada' } })),
     ];
     const payload = {
@@ -524,10 +567,11 @@ export default function App() {
         fireWindowHours: fireTimeWindow,
         firesVisible: visibleFires.length,
         dgtIncidentsVisible: dgtLayerEnabled ? trafficIncidents.length : 0,
+        earthquakesVisible: earthquakeLayerEnabled ? earthquakes.length : 0,
         effisFwiVisible: effisFwiEnabled,
         effisBurnedAreasVisible: effisBurnedEnabled,
         includesPreciseUserLocation: false,
-        warning: 'FIRMS no confirma incendios. EFFIS aporta contexto modelado y áreas quemadas, no órdenes ni rutas. Las rutas locales no están verificadas.',
+        warning: 'FIRMS no confirma incendios. Los terremotos USGS son información sísmica y no constituyen una alerta de tsunami. EFFIS no genera órdenes ni rutas. Las rutas locales no están verificadas.',
       },
     };
     const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/geo+json' }));
@@ -645,16 +689,18 @@ export default function App() {
           <label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Terremotos USGS</b><small>{earthquakeMode === 'live' ? `${earthquakes.length} eventos globales · 24 h · ${earthquakeStatusText}` : earthquakeMode === 'loading' ? 'Cargando feed GeoJSON oficial…' : 'USGS no disponible'}</small></span><input type="checkbox" disabled={earthquakeMode === 'error' && earthquakes.length === 0} checked={earthquakeLayerEnabled} onChange={(event) => setEarthquakeLayerEnabled(event.target.checked)}/></label>
+          {earthquakeLayerEnabled && <div className="earthquake-layer-context"><Activity/><span><b>Capa sísmica independiente</b><small>Magnitud y profundidad publicadas por USGS. No modifica el riesgo de incendio ni equivale a una alerta de tsunami.</small></span><div className="earthquake-layer-actions"><button type="button" onClick={() => mapRef.current?.fitBounds([[-179, -65], [179, 75]], { padding: 28 })}>Ver mundo</button>{strongestEarthquake && <button type="button" onClick={() => mapRef.current?.flyTo({ center: strongestEarthquake.coordinates, zoom: 12 })}>Mayor M{strongestEarthquake.magnitude.toFixed(1)}</button>}</div></div>}
           <label className="map-layer-switch"><span><b>Peligro meteorológico EFFIS</b><small>Índice FWI diario modelado · no es un incendio</small></span><input type="checkbox" checked={effisFwiEnabled} onChange={(event) => setEffisFwiEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Áreas quemadas EFFIS</b><small>Cartografía NRT de la temporada · no es un perímetro activo</small></span><input type="checkbox" checked={effisBurnedEnabled} onChange={(event) => setEffisBurnedEnabled(event.target.checked)}/></label>
           {(effisFwiEnabled || effisBurnedEnabled) && <div className="effis-layer-context"><img src={buildEffisLegendUrl(effisFwiEnabled ? 'fwi' : 'burned-areas')} alt={effisFwiEnabled ? 'Leyenda del índice de peligro FWI de EFFIS' : 'Leyenda de áreas quemadas EFFIS'}/><span><b>Copernicus EFFIS</b><small>Contexto europeo oficial. No confirma una emergencia local, una carretera ni una ruta.</small></span></div>}
           <label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label>
           <label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label>
-          <div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones · {trafficIncidents.length} afecciones DGT</div>
+          <div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} detecciones · {trafficIncidents.length} DGT{earthquakeLayerEnabled ? ` · ${earthquakes.length} sismos USGS` : ''}</div>
           <button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button>
-          <p>EFFIS y FIRMS son capas distintas: EFFIS añade peligro meteorológico y huella quemada; no genera órdenes ni rutas. La IA no interpreta estos píxeles.</p>
+          <p>FIRMS, EFFIS, DGT y USGS son fuentes independientes. Un terremoto no implica por sí mismo una alerta de tsunami. Ninguna de estas capas genera una orden o ruta de evacuación.</p>
         </section>}
-        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span>{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
+        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span><span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span>{earthquakeLayerEnabled && <span><i className="earthquake-dot"/> USGS {earthquakes.length} · 24 h</span>}{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
         {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local">
           <div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div>
           <div className="route-playback"><button className="route-play" onClick={toggleRoutePlayback} aria-label={routePlaying ? 'Pausar animación' : 'Reproducir animación'}>{routePlaying ? <Pause/> : <Play/>}</button><label><span>Progreso <b>{Math.round(routeProgress * 100)}%</b></span><input aria-label="Progreso de la ruta" type="range" min="0" max="1" step="0.001" value={routeProgress} onChange={(event) => { setRoutePlaying(false); setRouteProgress(Number(event.target.value)); }}/></label></div>
