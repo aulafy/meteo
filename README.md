@@ -17,6 +17,7 @@ Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador
 - Focos: NASA FIRMS (VIIRS NOAA-20, NOAA-21 y S-NPP) para España, actualizados por GitHub Actions cada 15 minutos. La `MAP_KEY` se conserva en el secreto `FIRMS_MAP_KEY` y nunca se entrega al navegador.
 - Contexto europeo: Copernicus EFFIS mediante su WMS oficial, con índice meteorológico FWI diario y áreas quemadas NRT de la temporada. Estas capas no confirman una emergencia local ni representan un perímetro operativo.
 - Tráfico: incidencias oficiales DGT DATEX II v3.7, normalizadas en el servidor.
+- Terremotos: feed GeoJSON global de USGS de las últimas 24 horas, validado y mostrado como capa independiente desactivada por defecto. No modifica el riesgo de incendio ni se interpreta como alerta de tsunami.
 - Cartografía: OpenFreeMap/MapLibre.
 
 El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. La consulta y el filtro geográfico cubren península, Baleares, Canarias, Ceuta y Melilla. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
@@ -39,9 +40,13 @@ Las capas «Peligro meteorológico EFFIS» y «Áreas quemadas EFFIS» se consum
 
 El backend consulta y normaliza el feed oficial [Incidencias DGT DATEX II v3.7](https://nap.dgt.es/es/dataset/incidencias-dgt-datex2-v3-7). METEO dibuja carreteras, calzadas y carriles cerrados, cortes intermitentes e incidencias de fuego/humo, con fuente y actualización visibles. La cobertura estatal excluye Cataluña y País Vasco y no garantiza vías locales o pistas forestales. Consulta los [límites y funcionamiento](docs/dgt-incidents.md).
 
+## Terremotos USGS
+
+La capa «Terremotos USGS» consume el [feed GeoJSON oficial de las últimas 24 horas](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson), actualizado por USGS cada minuto y consultado por METEO cada cinco minutos. Muestra clustering global, magnitud, profundidad, estado de revisión y enlace al evento oficial. Permanece desactivada por defecto y no participa en el índice de incendios, Groq ni las notificaciones push. El indicador sísmico de USGS no se convierte en una alerta de tsunami; esa función requerirá boletines CAP emitidos por centros oficiales.
+
 ## Función de Groq
 
-El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente y las incidencias DGT cercanas en una explicación breve. Una cabecera determinista indica siempre si existe una ruta verificada y si DGT está disponible. No recibe coordenadas exactas, no calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
+El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación estructurada que ya ve el residente, las detecciones FIRMS seleccionadas y las incidencias DGT cercanas en una explicación breve. Recibe las coordenadas públicas de los focos para generar enlaces verificables de Google Maps, pero no recibe el GPS ni las coordenadas de búsqueda del usuario. No calcula el nivel de riesgo, no confirma incendios, no crea rutas y no puede emitir órdenes de evacuación. La clave permanece en `GROQ_API_KEY` dentro de Vercel.
 
 ## Despliegue
 
