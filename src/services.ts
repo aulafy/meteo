@@ -172,3 +172,11 @@ export function rankFiresByDistance(location: Coordinates, fires: Fire[]) {
     distanceKm: distance(point(location), point(fire.coordinates), { units: 'kilometers' }),
   })).sort((a, b) => a.distanceKm - b.distanceKm);
 }
+
+export function selectFiresForAi(location: Coordinates | null, fires: Fire[]) {
+  if (location) return rankFiresByDistance(location, fires).slice(0, 3);
+  return [...fires]
+    .sort((a, b) => Date.parse(b.detectedAt) - Date.parse(a.detectedAt))
+    .slice(0, 5)
+    .map((fire) => ({ fire, distanceKm: null }));
+}

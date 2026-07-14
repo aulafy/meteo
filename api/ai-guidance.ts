@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { type ApiRequest, type ApiResponse, json } from './_lib.js';
 
 const inputSchema = z.object({
+  locationProvided: z.boolean(),
+  locationLabel: z.string().max(160).nullable(),
   riskLevel: z.enum(['bajo', 'moderado', 'alto', 'extremo']),
   riskScore: z.number().min(0).max(100),
   distanceKm: z.number().nonnegative().nullable(),
@@ -15,6 +17,14 @@ const inputSchema = z.object({
     windDirection: z.number().min(0).max(360),
   }),
   reasons: z.array(z.string().max(180)).max(8),
+  fires: z.array(z.object({
+    name: z.string().min(1).max(120),
+    coordinates: z.tuple([z.number().min(-19).max(5), z.number().min(27).max(44.5)]),
+    detectedAt: z.string().max(60).refine((value) => Number.isFinite(Date.parse(value)), 'Fecha FIRMS inválida'),
+    confidence: z.number().min(0).max(100),
+    frp: z.number().nonnegative().nullable(),
+    distanceKm: z.number().nonnegative().nullable(),
+  })).min(1).max(5),
   route: z.object({
     state: z.enum(['none', 'local-reference']),
     verified: z.literal(false),
@@ -32,19 +42,46 @@ const inputSchema = z.object({
       updatedAt: z.string().max(60),
     })).max(5),
   }),
+}).superRefine((value, context) => {
+  if (value.locationProvided && value.fires.length > 3) context.addIssue({ code: 'custom', path: ['fires'], message: 'Solo se admiten los tres focos más cercanos' });
+  if (!value.locationProvided && value.fires.some((fire) => fire.distanceKm !== null)) context.addIssue({ code: 'custom', path: ['fires'], message: 'No debe calcularse distancia sin ubicación' });
 });
+
+type AiSituation = z.infer<typeof inputSchema>;
+
+export function googleMapsLink(coordinates: [number, number]) {
+  const [longitude, latitude] = coordinates;
+  return `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+}
+
+export function buildFireOverview(situation: Pick<AiSituation, 'locationProvided' | 'locationLabel' | 'fires'>) {
+  const detectionLabel = situation.fires.length === 1 ? 'detección térmica' : 'detecciones térmicas';
+  const heading = situation.locationProvided
+    ? `${situation.fires.length} ${detectionLabel} más ${situation.fires.length === 1 ? 'cercana' : 'cercanas'}${situation.locationLabel ? ` a ${situation.locationLabel}` : ''}:`
+    : `${situation.fires.length} ${detectionLabel} más ${situation.fires.length === 1 ? 'reciente' : 'recientes'} en España:`;
+  const dateFormatter = new Intl.DateTimeFormat('es-ES', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Europe/Madrid' });
+  const rows = situation.fires.map((fire, index) => {
+    const [longitude, latitude] = fire.coordinates;
+    const distance = fire.distanceKm == null ? '' : ` · ${fire.distanceKm.toFixed(1)} km`;
+    const power = fire.frp == null ? '' : ` · ${fire.frp.toFixed(1)} MW`;
+    return `${index + 1}. ${fire.name}${distance}${power} · detectada ${dateFormatter.format(new Date(fire.detectedAt))} · ${latitude.toFixed(5)}, ${longitude.toFixed(5)}\n${googleMapsLink(fire.coordinates)}`;
+  });
+  return `${heading}\n${rows.join('\n')}`;
+}
 
 export const AI_SYSTEM_PROMPT = `Eres el asistente de situación de METEO para incendios forestales en España. Responde en español claro, breve y accionable, sin Markdown, asteriscos ni adornos. Usa exclusivamente el JSON suministrado y separa hechos de limitaciones.
 
 Reglas obligatorias:
 1. riskLevel es un nivel orientativo calculado por METEO, no un riesgo oficial. NASA FIRMS detecta anomalías térmicas y no confirma por sí sola un incendio.
 2. Si route.verified es false, METEO NO dispone de una ruta de evacuación verificada. Si route.state es local-reference, di que la línea mostrada fue importada por el usuario y no valida seguridad. Nunca ordenes seguirla ni la llames ruta segura.
-3. Solo menciona cortes o afecciones incluidos en traffic.incidents. Distingue carretera cortada, calzada cerrada, carril cerrado y cortes intermitentes. Si traffic.available es false, di que no se pudo consultar DGT. Si la lista está vacía, di que no hay afecciones cercanas en los datos entregados; nunca concluyas que todas las carreteras están abiertas.
+3. Solo menciona cortes o afecciones incluidos en traffic.incidents. Distingue carretera cortada, calzada cerrada, carril cerrado y cortes intermitentes. Si traffic.available es false, di que no se pudo consultar DGT. Si locationProvided es true y la lista está vacía, di que no hay afecciones cercanas en los datos entregados; nunca concluyas que todas las carreteras están abiertas. Sin ubicación, no hagas afirmaciones de proximidad.
 4. Los datos DGT no cubren Cataluña ni País Vasco y no incluyen necesariamente calles locales, caminos forestales, perímetros, controles policiales, refugios u órdenes de evacuación.
 5. Si weather.available es true, weather contiene meteorología actual de Open-Meteo. La antigüedad indicada en reasons se refiere a FIRMS. Si weather.available es false, ignora sus valores numéricos.
 6. No inventes carreteras, destinos, tiempos, perímetros, refugios, propagación ni órdenes. No contradigas a 112, ES-Alert, Protección Civil, bomberos, policía o agentes de tráfico.
+7. fires contiene la selección exacta de NASA FIRMS que METEO mostrará antes de tu explicación: hasta 3 detecciones más cercanas si locationProvided es true, o hasta 5 detecciones más recientes si es false. No las llames incendios confirmados, no cambies sus datos y no añadas otras. El servidor ya mostrará sus coordenadas y enlaces de Google Maps; no repitas el listado.
+8. Si locationProvided es false, no atribuyas al usuario distancias, riesgo, meteorología ni tráfico de una ubicación concreta. Limítate a explicar que el listado es nacional y que debe elegir ubicación o activar GPS para calcular proximidad.
 
-Orden de la respuesta: Situación verificada; Ruta y carreteras; Qué hacer ahora; Lo que falta confirmar. Ante humo denso, llamas, una orden oficial o peligro inmediato, indica llamar al 112 y seguir a los agentes.`;
+Orden de la explicación posterior al listado: Situación verificada; Ruta y carreteras; Qué hacer ahora; Lo que falta confirmar. Ante humo denso, llamas, una orden oficial o peligro inmediato, indica llamar al 112 y seguir a los agentes.`;
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== 'POST') return json(response, { error: 'Método no permitido' }, 405);
@@ -78,13 +115,16 @@ export default async function handler(request: ApiRequest, response: ApiResponse
       .replace(/^\s*\*\s+/gm, '• ')
       .replace(/nivel de riesgo de incendio forestal/gi, 'nivel orientativo de METEO')
       .replace(/riesgo de incendio forestal/gi, 'nivel orientativo de METEO');
+    const fireOverview = buildFireOverview(situation);
     const routeStatus = situation.route.state === 'local-reference'
       ? 'Ruta: hay una ruta local de referencia, pero no está verificada y no debe usarse como orden de evacuación.'
       : 'Ruta: METEO no dispone de una ruta de evacuación oficial o verificada.';
-    const trafficStatus = situation.traffic.available
+    const trafficStatus = !situation.locationProvided
+      ? 'DGT: sin ubicación no se ha calculado proximidad a incidencias de tráfico.'
+      : situation.traffic.available
       ? `DGT: datos consultados (${situation.traffic.coverage}); ${situation.traffic.incidents.length ? `${situation.traffic.incidents.length} ${situation.traffic.incidents.length === 1 ? 'afección cercana incluida' : 'afecciones cercanas incluidas'}` : 'sin afecciones cercanas en la selección recibida, lo que no garantiza que todas las vías estén abiertas'}.`
       : 'DGT: información no disponible temporalmente; METEO no puede confirmar qué carreteras están abiertas.';
-    const guidance = `${routeStatus}\n${trafficStatus}\n\n${cleanedGuidance}`;
+    const guidance = `${fireOverview}\n\n${routeStatus}\n${trafficStatus}\n\n${cleanedGuidance}`;
     return json(response, { guidance, model: 'Groq', disclaimer: 'Apoyo informativo; no sustituye a 112 ni a las autoridades.' });
   } catch (error) {
     const status = error instanceof z.ZodError ? 400 : 502;
