@@ -19,6 +19,7 @@ describe('análisis GeoLibre para METEO', () => {
     const indicator = buildWindIndicator([-3.7, 40.4], 270, 10);
     const endpoint = indicator.features[1];
     expect(endpoint.properties?.direction).toBe(90);
+    expect(endpoint.properties?.kind).toBe('arrow');
     expect(endpoint.geometry.type).toBe('Point');
   });
 
