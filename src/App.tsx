@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
 import { AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
-import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
+import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, selectFiresForAi, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
 import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
 import { buildEffisBurnedAreaTileUrl, buildEffisFwiImageUrl, buildEffisLegendUrl, EFFIS_ATTRIBUTION, EFFIS_SPAIN_IMAGE_COORDINATES, EFFIS_VIEWER_URL } from './effis';
@@ -33,6 +33,11 @@ const decodeVapidKey = (value: string) => {
   const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
 };
+const renderAiGuidance = (guidance: string) => guidance
+  .split(/(https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=-?\d+(?:\.\d+)?,-?\d+(?:\.\d+)?)/g)
+  .map((part, index) => part.startsWith('https://www.google.com/maps/')
+    ? <a key={`${part}-${index}`} href={part} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
+    : part);
 
 export default function App() {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -89,8 +94,8 @@ export default function App() {
   const hasPreciseLocation = locationKind === 'gps';
   const risk: RiskAssessment = useMemo(() => assessRisk(location, fires, weather), [location, weather, fires]);
   const nearestFires = useMemo(() => rankFiresByDistance(location, fires), [location, fires]);
+  const aiFires = useMemo(() => selectFiresForAi(hasSelectedLocation ? location : null, fires), [fires, hasSelectedLocation, location]);
   const nearestTraffic = useMemo(() => rankTrafficByDistance(location, trafficIncidents), [location, trafficIncidents]);
-  const hasSituationContext = Boolean((risk.nearestFire && risk.distanceKm <= 50) || (nearestTraffic[0] && nearestTraffic[0].distanceKm <= 50));
   const trafficForPanel = useMemo(() => hasSelectedLocation
     ? nearestTraffic
     : [...nearestTraffic].sort((a, b) => Number(b.incident.fireRelated) - Number(a.incident.fireRelated) || Number(b.incident.closure === 'complete') - Number(a.incident.closure === 'complete') || Date.parse(b.incident.updatedAt) - Date.parse(a.incident.updatedAt)), [hasSelectedLocation, nearestTraffic]);
@@ -526,17 +531,27 @@ export default function App() {
       const response = await fetch('/api/ai-guidance', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          locationProvided: hasSelectedLocation,
+          locationLabel: hasSelectedLocation ? locationLabel : null,
           riskLevel: risk.level, riskScore: risk.score,
-          distanceKm: Number.isFinite(risk.distanceKm) ? Number(risk.distanceKm.toFixed(1)) : null,
-          confidence: risk.nearestFire?.confidence ?? null, frp: risk.nearestFire?.frp != null ? Number(risk.nearestFire.frp.toFixed(1)) : null,
-          weather: { available: weather.available, temperature: Number(weather.temperature.toFixed(1)), humidity: Number(weather.humidity.toFixed(0)), windSpeed: Number(weather.windSpeed.toFixed(0)), windDirection: Number(weather.windDirection.toFixed(0)) },
-          reasons: risk.reasons,
+          distanceKm: hasSelectedLocation && Number.isFinite(risk.distanceKm) ? Number(risk.distanceKm.toFixed(1)) : null,
+          confidence: hasSelectedLocation ? risk.nearestFire?.confidence ?? null : null, frp: hasSelectedLocation && risk.nearestFire?.frp != null ? Number(risk.nearestFire.frp.toFixed(1)) : null,
+          weather: { available: hasSelectedLocation && weather.available, temperature: Number(weather.temperature.toFixed(1)), humidity: Number(weather.humidity.toFixed(0)), windSpeed: Number(weather.windSpeed.toFixed(0)), windDirection: Number(weather.windDirection.toFixed(0)) },
+          reasons: hasSelectedLocation ? risk.reasons : [],
+          fires: aiFires.map(({ fire, distanceKm }) => ({
+            name: fire.name,
+            coordinates: fire.coordinates,
+            detectedAt: fire.detectedAt,
+            confidence: fire.confidence,
+            frp: fire.frp != null ? Number(fire.frp.toFixed(1)) : null,
+            distanceKm: distanceKm == null ? null : Number(distanceKm.toFixed(1)),
+          })),
           route: { state: referenceRoute ? 'local-reference' : 'none', verified: false },
           traffic: {
             available: trafficMode === 'live',
             publishedAt: trafficPublishedAt?.toISOString() ?? null,
             coverage: 'Red estatal excepto Cataluña y País Vasco',
-            incidents: nearestTraffic.slice(0, 5).filter((item) => item.distanceKm <= 50).map(({ incident, distanceKm }) => ({ road: incident.road, status: trafficClosureLabel(incident.closure), cause: trafficCauseLabel(incident.cause), municipality: incident.municipality || incident.province, distanceKm: Number(distanceKm.toFixed(1)), updatedAt: incident.updatedAt })),
+            incidents: hasSelectedLocation ? nearestTraffic.slice(0, 5).filter((item) => item.distanceKm <= 50).map(({ incident, distanceKm }) => ({ road: incident.road, status: trafficClosureLabel(incident.closure), cause: trafficCauseLabel(incident.cause), municipality: incident.municipality || incident.province, distanceKm: Number(distanceKm.toFixed(1)), updatedAt: incident.updatedAt })) : [],
           },
         }),
       });
@@ -569,7 +584,7 @@ export default function App() {
           <div className="chips"><span><Wind size={14}/> {weather.available ? `${weather.windSpeed.toFixed(0)} km/h` : '—'}</span><span><CloudRain size={14}/> {weather.available ? `${weather.humidity.toFixed(0)}%` : '—'}</span><span><Thermometer size={14}/> {weather.available ? `${weather.temperature.toFixed(0)}°` : '—'}</span></div>
           {hasSelectedLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
           {hasSelectedLocation && <div className="evacuation-status"><Route/><div><small>RUTA DE EVACUACIÓN</small><b>{referenceRoute ? 'Ruta local visible · no verificada' : 'No hay una ruta oficial disponible'}</b><span>{referenceRoute ? 'No incorpora todos los cortes, perímetros ni órdenes oficiales.' : 'METEO no va a inventar una salida. Sigue ES‑Alert, 112 y a los agentes.'}</span></div></div>}
-          <button className="ai-button" disabled={!hasSelectedLocation || !hasSituationContext} onClick={explainRisk}><Bot size={17}/> {!hasSelectedLocation ? 'Elige una ubicación para obtener contexto' : hasSituationContext ? 'Explicar incendio y carreteras con IA' : 'Sin incidencias cercanas para explicar'}</button>
+          <button className="ai-button" disabled={fires.length === 0} onClick={explainRisk}><Bot size={17}/> {hasSelectedLocation ? 'Ver los 3 focos más cercanos con IA' : 'Ver los 5 focos más recientes con IA'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
@@ -644,7 +659,7 @@ export default function App() {
 
     {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
     {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="register-dialog-title" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" aria-label="Cerrar gestión de avisos" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2 id="register-dialog-title">{registered ? 'Gestiona tus avisos' : 'Activa avisos de proximidad'}</h2><p>{remoteRegistered ? 'Los avisos remotos 24/7 están activos en este dispositivo.' : 'METEO registrará este dispositivo para comprobar cada 15 minutos si existe una detección de alta confianza en un radio de 25 km. Es un canal complementario y no sustituye ES‑Alert ni a las autoridades.'}</p>{!registered && <><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></>}{registered && <button className="primary" type="button" onClick={deactivateAlerts}>Desactivar y eliminar mi ubicación</button>}</form></div>}
-    {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="ai-dialog-title" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar explicación de seguridad" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2 id="ai-dialog-title">Explicación de seguridad</h2>{aiLoading ? <p aria-live="polite">Analizando los datos visibles…</p> : <div className="ai-answer" role="region" aria-label="Respuesta del asistente" tabIndex={0}>{aiGuidance}</div>}<small>Groq · Apoyo informativo. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
+    {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="ai-dialog-title" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar explicación de seguridad" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2 id="ai-dialog-title">{hasSelectedLocation ? 'Focos más cercanos y seguridad' : 'Últimos focos detectados'}</h2>{aiLoading ? <p aria-live="polite">Analizando los datos visibles…</p> : <div className="ai-answer" role="region" aria-label="Respuesta del asistente" tabIndex={0}>{renderAiGuidance(aiGuidance)}</div>}<small>Groq · NASA FIRMS detecta anomalías térmicas, no confirma incendios. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
     {showRouteImport && <div className="modal-backdrop" onClick={() => setShowRouteImport(false)}><section className="modal route-import-modal" role="dialog" aria-modal="true" aria-labelledby="route-dialog-title" onClick={(event)=>event.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar importación de ruta" onClick={()=>setShowRouteImport(false)}><X/></button><div className="modal-icon"><Route/></div><h2 id="route-dialog-title">Cargar ruta de referencia</h2><p>Importa un GPX, KML o GeoJSON desde tu dispositivo. El archivo se procesa localmente y no modifica el nivel de riesgo ni tus alertas.</p><label className="consent"><input type="checkbox" checked={routeAcknowledged} onChange={(event)=>setRouteAcknowledged(event.target.checked)}/> Entiendo que METEO no ha verificado esta ruta y que no debo usarla como orden de evacuación.</label><label className={`route-file ${routeAcknowledged ? '' : 'disabled'}`}><Upload/> <span>{referenceRoute ? 'Sustituir ruta local' : 'Seleccionar GPX, KML o GeoJSON'}</span><input aria-label="Seleccionar archivo de ruta" disabled={!routeAcknowledged} type="file" accept=".gpx,.kml,.geojson,.json,application/geo+json,application/gpx+xml,application/vnd.google-earth.kml+xml" onChange={importReferenceRoute}/></label>{routeError && <p className="route-error" role="alert">{routeError}</p>}<small>Máximo 5 MB y 20.000 puntos. Solo rutas dentro de España.</small></section></div>}
   </div>;
 }

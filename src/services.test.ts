@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessRisk, getActionGuidance, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, trafficClosureLabel, windDirectionToCardinal } from './services';
+import { assessRisk, getActionGuidance, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, selectFiresForAi, trafficClosureLabel, windDirectionToCardinal } from './services';
 import type { Fire } from './types';
 
 const fires: Fire[] = [
@@ -23,6 +23,19 @@ describe('motor de seguridad', () => {
     const ordered = rankFiresByDistance(fires[0].coordinates, [fires[1], fires[0]]);
     expect(ordered[0].fire.id).toBe(fires[0].id);
     expect(ordered[0].distanceKm).toBe(0);
+  });
+  it('selecciona como máximo los tres focos más cercanos cuando hay ubicación', () => {
+    const candidates = Array.from({ length: 6 }, (_, index) => ({ ...fires[0], id: `near-${index}`, coordinates: [-7.94 + index * 0.1, 42.34] as [number, number] }));
+    const selected = selectFiresForAi([-7.94, 42.34], candidates);
+    expect(selected).toHaveLength(3);
+    expect(selected.map(({ fire }) => fire.id)).toEqual(['near-0', 'near-1', 'near-2']);
+    expect(selected.every(({ distanceKm }) => typeof distanceKm === 'number')).toBe(true);
+  });
+  it('selecciona los cinco focos más recientes cuando no hay ubicación', () => {
+    const candidates = Array.from({ length: 6 }, (_, index) => ({ ...fires[0], id: `recent-${index}`, detectedAt: new Date(Date.UTC(2026, 6, 14, index)).toISOString() }));
+    const selected = selectFiresForAi(null, candidates);
+    expect(selected.map(({ fire }) => fire.id)).toEqual(['recent-5', 'recent-4', 'recent-3', 'recent-2', 'recent-1']);
+    expect(selected.every(({ distanceKm }) => distanceKm === null)).toBe(true);
   });
   it('da instrucciones críticas sin inventar una ruta', () => {
     const guidance = getActionGuidance({ score: 82, level: 'extremo', nearestFire: fires[0], distanceKm: 3, reasons: [], etaMinutes: 0, isDownwind: true });
