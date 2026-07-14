@@ -40,7 +40,7 @@ export function buildWindIndicator(location: Coordinates, windFromDegrees: numbe
     type: 'FeatureCollection',
     features: [
       { type: 'Feature', properties: { kind: 'direction', direction }, geometry: { type: 'LineString', coordinates: [location, endpoint] } },
-      { type: 'Feature', properties: { kind: 'endpoint', direction }, geometry: { type: 'Point', coordinates: endpoint } },
+      { type: 'Feature', properties: { kind: 'arrow', direction }, geometry: { type: 'Point', coordinates: endpoint } },
     ],
   };
 }

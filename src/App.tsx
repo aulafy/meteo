@@ -29,6 +29,15 @@ const createRouteArrow = () => {
   context.fillStyle = '#2563eb'; context.fill(); context.lineWidth = 3; context.strokeStyle = '#ffffff'; context.stroke();
   return context.getImageData(0, 0, 48, 48);
 };
+const createWindArrow = () => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 48; canvas.height = 48;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  context.beginPath(); context.moveTo(24, 3); context.lineTo(40, 39); context.lineTo(24, 32); context.lineTo(8, 39); context.closePath();
+  context.fillStyle = '#e7b84d'; context.fill(); context.lineWidth = 4; context.strokeStyle = '#263128'; context.stroke();
+  return context.getImageData(0, 0, 48, 48);
+};
 const decodeVapidKey = (value: string) => {
   const padded = `${value}${'='.repeat((4 - value.length % 4) % 4)}`.replace(/-/g, '+').replace(/_/g, '/');
   return Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
@@ -236,7 +245,10 @@ export default function App() {
       map.addLayer({ id: 'user', type: 'circle', source: 'user', paint: { 'circle-radius': 7, 'circle-color': '#ffffff', 'circle-stroke-color': '#147355', 'circle-stroke-width': 4 } });
       map.addSource('wind-indicator', { type: 'geojson', data: emptyFeatureCollection });
       map.addLayer({ id: 'wind-indicator-line', type: 'line', source: 'wind-indicator', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'line-cap': 'round' }, paint: { 'line-color': '#e7b84d', 'line-width': 4, 'line-opacity': 0.9, 'line-dasharray': [2, 1] } });
-      map.addLayer({ id: 'wind-indicator-tip', type: 'circle', source: 'wind-indicator', filter: ['==', ['geometry-type'], 'Point'], paint: { 'circle-radius': 7, 'circle-color': '#e7b84d', 'circle-stroke-width': 3, 'circle-stroke-color': '#263128' } });
+      map.addLayer({ id: 'wind-indicator-label', type: 'symbol', source: 'wind-indicator', filter: ['==', ['geometry-type'], 'LineString'], layout: { 'symbol-placement': 'line', 'symbol-spacing': 500, 'text-field': 'VIENTO · NO ES RUTA', 'text-size': 10, 'text-letter-spacing': 0.08, 'text-keep-upright': true }, paint: { 'text-color': '#674d12', 'text-halo-color': '#fffdf5', 'text-halo-width': 2 } });
+      const windArrow = createWindArrow();
+      if (windArrow) map.addImage('meteo-wind-arrow', windArrow, { pixelRatio: 2 });
+      map.addLayer({ id: 'wind-indicator-arrow', type: 'symbol', source: 'wind-indicator', filter: ['==', ['geometry-type'], 'Point'], layout: { 'icon-image': 'meteo-wind-arrow', 'icon-size': 0.75, 'icon-rotate': ['get', 'direction'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
       const arrow = createRouteArrow();
       if (arrow) map.addImage('meteo-route-arrow', arrow, { pixelRatio: 2 });
       map.addLayer({ id: 'reference-route-marker-symbol', type: 'symbol', source: 'reference-route-marker', layout: { 'icon-image': 'meteo-route-arrow', 'icon-size': 0.65, 'icon-rotate': ['get', 'bearing'], 'icon-rotation-alignment': 'map', 'icon-allow-overlap': true, 'icon-ignore-placement': true } });
@@ -626,7 +638,7 @@ export default function App() {
       <section className="map-wrap">
         <div ref={mapContainer} className="map" />
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
-        {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>EL VIENTO SOPLA HACIA</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b></div></div>}
+        {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>DIRECCIÓN DEL VIENTO</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b><em>Indicador visual · no es una ruta</em></div></div>}
         <div className="map-tools"><button className={showMapLayers ? 'active' : ''} aria-expanded={showMapLayers} onClick={() => setShowMapLayers((visible) => !visible)} title="Capas y análisis GeoLibre" aria-label="Capas y análisis GeoLibre"><Layers/></button><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
         {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa">
           <div className="map-layer-heading"><div><b>Capas y análisis</b><small>GeoLibre · MapLibre · fuentes oficiales</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div>
