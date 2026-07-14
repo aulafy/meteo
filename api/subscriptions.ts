@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { type ApiRequest, type ApiResponse, database, json } from './_lib.js';
+import { type ApiRequest, type ApiResponse, database, enforceRateLimit, json } from './_lib.js';
 
 const subscriptionSchema = z.object({
   subscription: z.object({
@@ -16,6 +16,7 @@ const subscriptionSchema = z.object({
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== 'POST' && request.method !== 'DELETE') return json(response, { error: 'Método no permitido' }, 405);
+  if (!enforceRateLimit(request, response, { namespace: 'subscriptions', limit: 20, windowMs: 60_000 })) return;
   try {
     const db = database();
     if (request.method === 'DELETE') {
@@ -43,7 +44,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     if (error) throw error;
     return json(response, { ok: true }, 201);
   } catch (error) {
-    const message = error instanceof z.ZodError ? 'Datos de suscripción inválidos' : error instanceof Error ? error.message : 'Error interno';
-    return json(response, { error: message }, message === 'Backend no configurado' ? 503 : 400);
+    if (error instanceof z.ZodError) return json(response, { error: 'Datos de suscripción inválidos' }, 400);
+    if (error instanceof Error && error.message === 'Backend no configurado') return json(response, { error: 'Backend no configurado' }, 503);
+    console.error('subscriptions failed', error instanceof Error ? { message: error.message } : { message: 'Error desconocido' });
+    return json(response, { error: 'No se pudo gestionar la suscripción' }, 500);
   }
 }

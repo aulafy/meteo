@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { type ApiRequest, type ApiResponse, json } from './_lib.js';
+import { type ApiRequest, type ApiResponse, enforceRateLimit, json } from './_lib.js';
 
 const inputSchema = z.object({
   locationProvided: z.boolean(),
@@ -85,6 +85,7 @@ Orden de la explicación posterior al listado: Situación verificada; Ruta y car
 
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== 'POST') return json(response, { error: 'Método no permitido' }, 405);
+  if (!enforceRateLimit(request, response, { namespace: 'ai-guidance', limit: 12, windowMs: 60_000 })) return;
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return json(response, { error: 'Asistente no configurado' }, 503);
 

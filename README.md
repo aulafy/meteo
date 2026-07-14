@@ -61,6 +61,8 @@ El directorio `api/` contiene funciones Vercel para suscribir dispositivos y eva
 
 El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Ingiere y audita FIRMS en PostGIS. La función SQL `pending_alert_candidates` selecciona mediante `ST_DWithin` la observación más próxima a cada dispositivo, con confianza mínima del 70%, una antigüedad máxima de 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
 
+Los endpoints de IA, suscripciones y DGT aplican límites básicos por IP dentro de cada instancia servidor. Para una campaña pública deben complementarse con límites distribuidos o firewall en Vercel; el control local no sustituye esa protección.
+
 La persona puede desactivar los avisos desde la propia app; esto elimina la suscripción y su ubicación. Como límite adicional, el evaluador elimina automáticamente suscripciones que lleven 180 días sin renovarse, observaciones con más de 30 días, auditorías de ingesta con más de 90 días y entregas con más de 365 días. La [documentación de backend](docs/supabase-backend.md) detalla el modelo de seguridad y el orden de despliegue.
 
 ## Arquitectura de producción recomendada
@@ -72,6 +74,8 @@ El cliente nunca decide por sí solo una evacuación real. El backend ya ingiere
 METEO no sustituye las instrucciones de emergencias. Para su adopción pública hacen falta validación con autoridades, pruebas de carga, auditoría de privacidad/consentimiento, retención mínima de ubicaciones y redundancia de proveedores.
 
 Las detecciones FIRMS son puntos térmicos observados por satélite, no incendios confirmados ni perímetros operativos. Pueden llegar con retraso debido a la órbita, nubosidad o procesamiento y deben contrastarse con 112, Protección Civil y los servicios autonómicos.
+
+Consulta el tratamiento técnico en [PRIVACY.md](PRIVACY.md), la comunicación privada de vulnerabilidades en [SECURITY.md](SECURITY.md) y las licencias de dependencias en [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Licencia
 
