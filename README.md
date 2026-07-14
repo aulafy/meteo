@@ -42,7 +42,7 @@ El backend consulta y normaliza el feed oficial [Incidencias DGT DATEX II v3.7](
 
 ## Terremotos USGS
 
-La capa «Terremotos USGS» consume el [feed GeoJSON oficial de las últimas 24 horas](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson), actualizado por USGS cada minuto y consultado por METEO cada cinco minutos. Muestra clustering global, magnitud, profundidad, estado de revisión y enlace al evento oficial. Permanece desactivada por defecto y no participa en el índice de incendios, Groq ni las notificaciones push. El indicador sísmico de USGS no se convierte en una alerta de tsunami; esa función requerirá boletines CAP emitidos por centros oficiales.
+La capa «Terremotos USGS» consume el [feed GeoJSON oficial de las últimas 24 horas](https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson), actualizado por USGS cada minuto y consultado por METEO cada cinco minutos. Muestra clustering global, magnitud, profundidad, estado de revisión y enlace al evento oficial. El panel resume los tres terremotos más cercanos si se ha indicado una ubicación o los cinco más recientes si no se ha compartido ninguna; nunca trata el centro inicial de España como la posición del usuario. La capa permanece desactivada por defecto y no participa en el índice de incendios, Groq ni las notificaciones push. El indicador sísmico de USGS no se convierte en una alerta de tsunami; esa función requerirá boletines CAP emitidos por centros oficiales.
 
 ## Función de Groq
 

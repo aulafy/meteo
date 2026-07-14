@@ -7,6 +7,7 @@ import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
 import { buildEffisBurnedAreaTileUrl, buildEffisFwiImageUrl, buildEffisLegendUrl, EFFIS_ATTRIBUTION, EFFIS_SPAIN_IMAGE_COORDINATES, EFFIS_VIEWER_URL } from './effis';
 import { addEarthquakeLayers, earthquakeFeatureCollection, setEarthquakeLayerVisibility, updateEarthquakeSource } from './features/earthquakes/map';
+import { EarthquakeSummary } from './features/earthquakes/EarthquakeSummary';
 import type { Earthquake } from './features/earthquakes/types';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
 
@@ -659,6 +660,22 @@ export default function App() {
           {trafficForPanel.slice(0, 4).map(({ incident, distanceKm }) => <button className={`traffic-row closure-${incident.closure}`} key={incident.id} onClick={() => mapRef.current?.flyTo({ center: incident.coordinates[0], zoom: 13 })}><span className="traffic-road">{incident.road}</span><span><b>{trafficClosureLabel(incident.closure)}</b><small>{trafficCauseLabel(incident.cause)} · {incident.municipality || incident.province || 'Red DGT'} · act. {new Date(incident.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</small></span>{hasSelectedLocation && <strong>{distanceKm.toFixed(1)} km</strong>}</button>)}
           <p className="traffic-coverage">Red estatal excepto Cataluña y País Vasco. No incluye necesariamente calles, caminos forestales ni controles locales.</p>
         </section>
+
+        <EarthquakeSummary
+          earthquakes={earthquakes}
+          location={hasSelectedLocation ? location : null}
+          mode={earthquakeMode}
+          statusText={earthquakeStatusText}
+          onShowLayer={() => {
+            setEarthquakeLayerEnabled(true);
+            setShowMapLayers(true);
+            mapRef.current?.fitBounds([[-179, -65], [179, 75]], { padding: 28 });
+          }}
+          onSelect={(earthquake) => {
+            setEarthquakeLayerEnabled(true);
+            mapRef.current?.flyTo({ center: earthquake.coordinates, zoom: 8, duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1_200 });
+          }}
+        />
 
         <section className="panel-section resident-section">
           <div className="section-title"><div><h2>Información para residentes</h2><span>Según tu proximidad y las condiciones</span></div><ShieldCheck size={20}/></div>
