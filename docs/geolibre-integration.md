@@ -24,6 +24,7 @@ METEO reproduce sobre su instancia MapLibre los patrones de GeoLibre que sí ayu
 | Exportación | GeoJSON de detecciones visibles y ruta local | Excluye la ubicación precisa del usuario |
 | Medición geodésica y sobre terreno | Distancia por puntos, con desnivel cuando el DEM está disponible | Medición visual; no representa una ruta transitable ni una distancia de evacuación |
 | Parte imprimible | Resumen local con fecha, fuentes, capas y advertencias | No incluye coordenadas GPS ni sustituye un parte oficial |
+| Comparación de capas | Transparencia independiente para imagen Esri, FWI y áreas quemadas EFFIS | Comparación visual; las capas no comparten fecha ni resolución |
 | View state y controles | Escala métrica, pantalla completa, pitch y brújula | Ayudas cartográficas, no información oficial |
 | Dirección del viento | Segmento desde la ubicación hacia sotavento | No es un cono ni una predicción de avance del fuego |
 
@@ -43,6 +44,7 @@ Referencias oficiales:
 - **Nubes, precipitación animada, sol y efectos atmosféricos:** tienen coste visual y de rendimiento sin añadir una señal operativa suficiente.
 - **3D Tiles arbitrarios:** requieren código y datos externos de confianza; se evaluarán solo para datasets españoles con procedencia, licencia y fecha conocidas.
 - **Compartir proyectos con ubicación:** se evita para no exponer accidentalmente el GPS de residentes.
+- **Timelapse EOX:** GeoLibre añadió mosaicos anuales Sentinel-2, pero EOX cambió sus términos en junio de 2026. El uso comercial requiere licencia y el producto anual no representa una emergencia actual; METEO no lo activa mientras no exista una decisión expresa de licencia y finalidad.
 
 ## Privacidad y seguridad
 
