@@ -107,12 +107,15 @@ export default function App() {
   const [showMapLayers, setShowMapLayers] = useState(false);
   const [terrainEnabled, setTerrainEnabled] = useState(false);
   const [satelliteEnabled, setSatelliteEnabled] = useState(false);
+  const [satelliteOpacity, setSatelliteOpacity] = useState(92);
   const [windLayerEnabled, setWindLayerEnabled] = useState(true);
   const [dgtLayerEnabled, setDgtLayerEnabled] = useState(true);
   const [earthquakeLayerEnabled, setEarthquakeLayerEnabled] = useState(false);
   const [cataloniaFireLayerEnabled, setCataloniaFireLayerEnabled] = useState(true);
   const [effisFwiEnabled, setEffisFwiEnabled] = useState(false);
   const [effisBurnedEnabled, setEffisBurnedEnabled] = useState(false);
+  const [effisFwiOpacity, setEffisFwiOpacity] = useState(50);
+  const [effisBurnedOpacity, setEffisBurnedOpacity] = useState(72);
   const [fireTimeWindow, setFireTimeWindow] = useState<FireTimeWindow>(24);
   const [routeElevation, setRouteElevation] = useState<ElevationProfile | null>(null);
   const [routeElevationLoading, setRouteElevationLoading] = useState(false);
@@ -459,15 +462,33 @@ export default function App() {
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map?.getLayer('meteo-satellite')) return;
+    map.setPaintProperty('meteo-satellite', 'raster-opacity', satelliteOpacity / 100);
+  }, [satelliteOpacity]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map?.getLayer('effis-fwi')) return;
     map.setLayoutProperty('effis-fwi', 'visibility', effisFwiEnabled ? 'visible' : 'none');
   }, [effisFwiEnabled]);
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map?.getLayer('effis-fwi')) return;
+    map.setPaintProperty('effis-fwi', 'raster-opacity', effisFwiOpacity / 100);
+  }, [effisFwiOpacity]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map?.getLayer('effis-burned-areas')) return;
     map.setLayoutProperty('effis-burned-areas', 'visibility', effisBurnedEnabled ? 'visible' : 'none');
   }, [effisBurnedEnabled]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.getLayer('effis-burned-areas')) return;
+    map.setPaintProperty('effis-burned-areas', 'raster-opacity', effisBurnedOpacity / 100);
+  }, [effisBurnedOpacity]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -815,13 +836,17 @@ export default function App() {
           <div className="map-layer-heading"><div><b>Capas y análisis</b><small>GeoLibre · MapLibre · fuentes oficiales</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div>
           <label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label>
+          {satelliteEnabled && <label className="layer-opacity-control"><span>Opacidad de imagen <b>{satelliteOpacity}%</b></span><input aria-label="Opacidad de imagen satelital" type="range" min="0" max="100" step="1" value={satelliteOpacity} onChange={(event) => setSatelliteOpacity(Number(event.target.value))}/></label>}
           <label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Actuaciones Bombers Catalunya</b><small>{cataloniaFireMode === 'live' ? `${operationalCataloniaFires.length} actuaciones no extinguidas · ${cataloniaFireStatusText}` : cataloniaFireMode === 'loading' ? 'Cargando servicio oficial…' : 'Bombers no disponible'}</small></span><input type="checkbox" disabled={cataloniaFireMode === 'error' && cataloniaFires.length === 0} checked={cataloniaFireLayerEnabled} onChange={(event) => setCataloniaFireLayerEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Terremotos USGS</b><small>{earthquakeMode === 'live' ? `${earthquakes.length} eventos globales · 24 h · ${earthquakeStatusText}` : earthquakeMode === 'loading' ? 'Cargando feed GeoJSON oficial…' : 'USGS no disponible'}</small></span><input type="checkbox" disabled={earthquakeMode === 'error' && earthquakes.length === 0} checked={earthquakeLayerEnabled} onChange={(event) => setEarthquakeLayerEnabled(event.target.checked)}/></label>
           {earthquakeLayerEnabled && <div className="earthquake-layer-context"><Activity/><span><b>Capa sísmica independiente</b><small>Magnitud y profundidad publicadas por USGS. No modifica el riesgo de incendio ni equivale a una alerta de tsunami.</small></span><div className="earthquake-layer-actions"><button type="button" onClick={() => mapRef.current?.fitBounds([[-179, -65], [179, 75]], { padding: 28 })}>Ver mundo</button>{strongestEarthquake && <button type="button" onClick={() => mapRef.current?.flyTo({ center: strongestEarthquake.coordinates, zoom: 12 })}>Mayor M{strongestEarthquake.magnitude.toFixed(1)}</button>}</div></div>}
           <label className="map-layer-switch"><span><b>Peligro meteorológico EFFIS</b><small>Índice FWI diario modelado · no es un incendio</small></span><input type="checkbox" checked={effisFwiEnabled} onChange={(event) => setEffisFwiEnabled(event.target.checked)}/></label>
+          {effisFwiEnabled && <label className="layer-opacity-control"><span>Opacidad FWI <b>{effisFwiOpacity}%</b></span><input aria-label="Opacidad del peligro meteorológico EFFIS" type="range" min="0" max="100" step="1" value={effisFwiOpacity} onChange={(event) => setEffisFwiOpacity(Number(event.target.value))}/></label>}
           <label className="map-layer-switch"><span><b>Áreas quemadas EFFIS</b><small>Cartografía NRT de la temporada · no es un perímetro activo</small></span><input type="checkbox" checked={effisBurnedEnabled} onChange={(event) => setEffisBurnedEnabled(event.target.checked)}/></label>
+          {effisBurnedEnabled && <label className="layer-opacity-control"><span>Opacidad de áreas <b>{effisBurnedOpacity}%</b></span><input aria-label="Opacidad de áreas quemadas EFFIS" type="range" min="0" max="100" step="1" value={effisBurnedOpacity} onChange={(event) => setEffisBurnedOpacity(Number(event.target.value))}/></label>}
           {(effisFwiEnabled || effisBurnedEnabled) && <div className="effis-layer-context"><img src={buildEffisLegendUrl(effisFwiEnabled ? 'fwi' : 'burned-areas')} alt={effisFwiEnabled ? 'Leyenda del índice de peligro FWI de EFFIS' : 'Leyenda de áreas quemadas EFFIS'}/><span><b>Copernicus EFFIS</b><small>Contexto europeo oficial. No confirma una emergencia local, una carretera ni una ruta.</small></span></div>}
+          {(satelliteEnabled || effisFwiEnabled || effisBurnedEnabled) && <div className="layer-comparison-note"><Layers/><span><b>Comparación visual</b><small>Ajusta cada transparencia para contrastar capas. No compara fechas equivalentes ni calcula evolución del fuego.</small></span><button type="button" onClick={() => { setSatelliteOpacity(92); setEffisFwiOpacity(50); setEffisBurnedOpacity(72); }}>Restablecer</button></div>}
           <label className="map-layer-switch"><span><b>Dirección del viento</b><small>{hasSelectedLocation ? 'Línea hacia sotavento · no predice el fuego' : 'Selecciona una ubicación para mostrarla'}</small></span><input type="checkbox" disabled={!hasSelectedLocation || !weather.available} checked={windLayerEnabled} onChange={(event) => setWindLayerEnabled(event.target.checked)}/></label>
           <label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label>
           <div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} FIRMS · {operationalCataloniaFires.length} Bombers CAT · {trafficIncidents.length} DGT{earthquakeLayerEnabled ? ` · ${earthquakes.length} sismos USGS` : ''}</div>

@@ -54,7 +54,7 @@ METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambo
 
 La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
 
-El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento, medición geodésica/3D, exportación GeoJSON y un parte A4 sin el GPS del residente. Las mediciones son visuales: no representan una ruta de evacuación ni certifican una vía transitable. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
+El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento, medición geodésica/3D, comparación por transparencia, exportación GeoJSON y un parte A4 sin el GPS del residente. Las mediciones son visuales: no representan una ruta de evacuación ni certifican una vía transitable. La comparación tampoco implica que las capas compartan fecha o resolución. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
 
 ## Copernicus EFFIS
 
