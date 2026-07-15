@@ -2,7 +2,7 @@
 
 ## Resultado
 
-Arrancarás METEO, ejecutarás 45 pruebas y producirás un build sin configurar
+Arrancarás METEO, ejecutarás 58 pruebas unitarias y producirás un build sin configurar
 Supabase ni una API de IA.
 
 ## 1. Clona y crea una rama
@@ -39,7 +39,18 @@ Abre `http://localhost:5173`. Comprueba dos recorridos:
 1. deniega la geolocalización: debe mantenerse una vista general sin distancias
    presentadas como personales;
 2. busca manualmente una localidad: deben aparecer meteorología y contexto sin
-   activar avisos remotos.
+activar avisos remotos.
+
+Para repetir los recorridos críticos de navegador con fuentes simuladas:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+Playwright usa un puerto estricto y comprueba vistas de 390 y 1440 píxeles. No debe
+reutilizar otro servidor local: validar accidentalmente una web distinta produciría
+un falso positivo.
 
 ## 4. Entiende las variables
 
@@ -88,4 +99,3 @@ fallo y lugar donde se conserva el secreto.
 
 Guarda la salida de `npm run check` y una captura de la app con geolocalización
 denegada. Debe ser posible repetir el resultado desde un clon limpio.
-

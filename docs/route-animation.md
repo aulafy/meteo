@@ -34,7 +34,7 @@ La ruta importada nunca se mezcla con el motor de riesgo ni con las alertas. Se 
 | KML | Geometría, nombres, estilos, carpetas, tiempos y ciertos overlays | Puede incluir NetworkLinks, modelos 3D, GroundOverlay y extensiones `gx:*` que un conversor ligero no conserva | Intercambio con Google Earth y organismos que publiquen KML |
 | GeoJSON | Geometría web sencilla, propiedades y carga directa en MapLibre | No define semántica de ruta, seguridad, tiempos o estilos; RFC 7946 usa WGS84 `[longitud, latitud]` | Formato normalizado interno para la web |
 
-METEO convierte GPX/KML a GeoJSON en el navegador mediante [`@tmcw/togeojson`](https://github.com/tmcw/togeojson). Para cada archivo conserva las líneas visibles, elige la línea de mayor longitud para la animación y descarta puntos/waypoints del motor de animación.
+METEO convierte GPX/KML a GeoJSON en el navegador mediante [`@tmcw/togeojson`](https://github.com/tmcw/togeojson). Para cada archivo conserva las líneas visibles, elige la línea de mayor longitud para la animación y descarta puntos/waypoints del motor de animación. El importador y esa dependencia están separados mediante `import()` dinámico: la apertura normal no los descarga y el bloque se solicita únicamente después de que la persona elija un archivo.
 
 ## Alternativas
 

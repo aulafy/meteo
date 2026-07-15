@@ -8,5 +8,8 @@ vite.config.d.ts
 .DS_Store
 work/
 .vercel
+playwright-report/
+test-results/
+blob-report/
 .env*
 !.env.example

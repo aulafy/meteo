@@ -65,7 +65,7 @@ registrar fallos y respetar idempotencia.
 
 ## 6. Lista de comprobación de preview
 
-- [ ] build y pruebas pasan desde un clon limpio;
+- [ ] `npm run check` y `npm run test:e2e` pasan desde un clon limpio;
 - [ ] variables Preview no apuntan a producción;
 - [ ] mapa, búsqueda y estados de error funcionan;
 - [ ] ninguna clave aparece en Sources o Network del navegador;
@@ -79,4 +79,3 @@ registrar fallos y respetar idempotencia.
 
 Antes de producción fija alertas de uso, Spend Cap cuando aplique, límite de IA,
 responsable y condición de apagado. «Miraremos la factura» no es control preventivo.
-

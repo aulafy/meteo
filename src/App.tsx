@@ -3,7 +3,7 @@ import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibr
 import { Activity, AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Printer, Radio, Route, Ruler, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
 import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, selectFiresForAi, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
-import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
+import { sampleRoute, type ReferenceRoute } from './routes';
 import { buildWindIndicator, fetchRouteElevation, filterFiresByWindow, FIRE_TIME_WINDOWS, type ElevationProfile, type FireTimeWindow } from './geolibre-analysis';
 import { buildEffisBurnedAreaTileUrl, buildEffisFwiImageUrl, buildEffisLegendUrl, EFFIS_ATTRIBUTION, EFFIS_SPAIN_IMAGE_COORDINATES, EFFIS_VIEWER_URL } from './effis';
 import { addEarthquakeLayers, earthquakeFeatureCollection, setEarthquakeLayerVisibility, updateEarthquakeSource } from './features/earthquakes/map';
@@ -615,6 +615,7 @@ export default function App() {
     setRouteError('');
     try {
       if (file.size > 5 * 1024 * 1024) throw new Error('El archivo supera el límite local de 5 MB');
+      const { parseRouteText } = await import('./route-importer');
       const parsed = parseRouteText(await file.text(), file.name);
       setReferenceRoute(parsed); setRouteProgress(0); setRoutePlaying(false); setRouteElevation(null); setRouteElevationError(''); setShowRouteImport(false); setRouteAcknowledged(false);
       mapRef.current?.fitBounds(parsed.bounds, { padding: 70, maxZoom: 15 });
