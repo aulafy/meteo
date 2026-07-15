@@ -84,6 +84,14 @@ Una caché compartida de cinco minutos puede convertir muchas solicitudes iguale
 una sola consulta del backend. Agrupa variables compatibles, evita polling con la
 pestaña oculta y aplica backoff después de un fallo.
 
+Una caché local de resiliencia tiene otra finalidad: conservar una respuesta pública
+ya validada cuando la red desaparece. Guarda el JSON original únicamente después de
+validarlo, vuelve a validarlo al leerlo y conserva por separado la hora de guardado.
+La interfaz debe decir «copia local» y aplicar una caducidad adecuada a cada fuente.
+No mezcles en ese almacén GPS, búsquedas, rutas o respuestas de IA. Una copia FIRMS
+puede servir como contexto, pero no debe disparar una notificación ni presentarse como
+una observación recién recibida.
+
 ## Coste y licencia
 
 La API gratuita de Open-Meteo es para uso no comercial y tiene límites publicados.
@@ -106,6 +114,6 @@ priorizados y pruebas concretas.
 
 ## Evidencia
 
-Escribe pruebas con una respuesta válida, vacía, 429, 500, JSON inválido y fecha
-imposible. La interfaz debe diferenciar cada caso sin fabricar datos.
-
+Escribe pruebas con una respuesta válida, vacía, 429, 500, JSON inválido, timeout,
+fecha imposible, copia válida y copia caducada. La interfaz debe diferenciar cada
+caso sin fabricar datos.

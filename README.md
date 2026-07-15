@@ -44,6 +44,8 @@ npm run check
 
 El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. La consulta y el filtro geográfico cubren península, Baleares, Canarias, Ceuta y Melilla. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
 
+Si falla temporalmente una fuente pública, el navegador puede recuperar de IndexedDB la última respuesta que ya hubiera validado: FIRMS hasta 24 horas, DGT hasta 2 horas, Bombers Catalunya hasta 12 horas y USGS hasta 48 horas. La interfaz la marca como «copia local», conserva la antigüedad de la fuente y no permite que FIRMS en caché active notificaciones o consultas a la IA. No se guardan en esa caché GPS, búsquedas, meteorología ligada a coordenadas, suscripciones ni respuestas de Groq.
+
 Las actuaciones de Bombers no se convierten automáticamente en detecciones FIRMS ni modifican todavía el índice o las notificaciones: el servicio oficial publica ubicación operativa, fase y dotaciones, pero no una intensidad térmica, un perímetro ni una orden de evacuación. Las actuaciones sin fase solo se muestran durante 24 horas desde su última actualización y se rotulan como «Fase no publicada».
 
 ## Integración con MeteoFlow

@@ -2,11 +2,12 @@ import { Activity, ChevronRight, ExternalLink } from 'lucide-react';
 import type { Coordinates } from '../../types';
 import { formatEarthquakeDistance, selectEarthquakesForSummary } from './selectors';
 import type { Earthquake } from './types';
+import type { PublicDataMode } from '../../public-data-resilience';
 
 interface EarthquakeSummaryProps {
   earthquakes: Earthquake[];
   location: Coordinates | null;
-  mode: 'loading' | 'live' | 'error';
+  mode: PublicDataMode;
   statusText: string;
   onSelect: (earthquake: Earthquake) => void;
   onShowLayer: () => void;
@@ -30,7 +31,8 @@ export function EarthquakeSummary({ earthquakes, location, mode, statusText, onS
     </div>
     {mode === 'error' && earthquakes.length === 0 && <p className="route-copy">USGS no está disponible. METEO no puede confirmar la actividad sísmica reciente.</p>}
     {mode === 'loading' && earthquakes.length === 0 && <p className="route-copy">Cargando el feed sísmico oficial…</p>}
-    {mode === 'live' && items.length === 0 && <p className="route-copy">USGS no publica terremotos en el feed de las últimas 24 horas.</p>}
+    {mode === 'cache' && <p className="source-cache-warning">Copia local: consulta USGS para confirmar eventos nuevos o revisiones.</p>}
+    {(mode === 'live' || mode === 'cache') && items.length === 0 && <p className="route-copy">Sin terremotos en la copia disponible.</p>}
     <div className="earthquake-summary-list">
       {items.map(({ earthquake, distanceKm }) => <article className="earthquake-summary-row" key={earthquake.id}>
         <button type="button" onClick={() => onSelect(earthquake)} aria-label={`Ver terremoto de magnitud ${earthquake.magnitude.toFixed(1)} en ${earthquake.place}`}>

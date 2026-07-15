@@ -15,6 +15,7 @@ import { selectOperationalCataloniaFires } from './features/cataloniaFires/selec
 import type { CataloniaFireIncident } from './features/cataloniaFires/types';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
 import { formatDistance, measurePath } from './measurements';
+import { loadResilientJson, type PublicDataMode } from './public-data-resilience';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
 const emptyFeatureCollection = { type: 'FeatureCollection' as const, features: [] };
@@ -76,19 +77,19 @@ export default function App() {
   const [lastSync, setLastSync] = useState(new Date());
   const [clock, setClock] = useState(Date.now());
   const [fires, setFires] = useState<Fire[]>([]);
-  const [fireMode, setFireMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [fireMode, setFireMode] = useState<PublicDataMode>('loading');
   const visibleFiresRef = useRef<Fire[]>([]);
   const trafficRef = useRef<TrafficIncident[]>([]);
   const [trafficIncidents, setTrafficIncidents] = useState<TrafficIncident[]>([]);
-  const [trafficMode, setTrafficMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [trafficMode, setTrafficMode] = useState<PublicDataMode>('loading');
   const [trafficPublishedAt, setTrafficPublishedAt] = useState<Date | null>(null);
   const earthquakeRef = useRef<Earthquake[]>([]);
   const [earthquakes, setEarthquakes] = useState<Earthquake[]>([]);
-  const [earthquakeMode, setEarthquakeMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [earthquakeMode, setEarthquakeMode] = useState<PublicDataMode>('loading');
   const [earthquakeLastSync, setEarthquakeLastSync] = useState<Date | null>(null);
   const cataloniaFireRef = useRef<CataloniaFireIncident[]>([]);
   const [cataloniaFires, setCataloniaFires] = useState<CataloniaFireIncident[]>([]);
-  const [cataloniaFireMode, setCataloniaFireMode] = useState<'loading' | 'live' | 'error'>('loading');
+  const [cataloniaFireMode, setCataloniaFireMode] = useState<PublicDataMode>('loading');
   const [cataloniaFireLastSync, setCataloniaFireLastSync] = useState<Date | null>(null);
   const notifiedFireRef = useRef('');
   const [aiGuidance, setAiGuidance] = useState('');
@@ -144,13 +145,13 @@ export default function App() {
   const actionGuidance = useMemo(() => getActionGuidance(risk), [risk]);
   const feedAgeMinutes = Math.max(0, (clock - lastSync.getTime()) / 60000);
   const feedIsStale = fireMode === 'live' && feedAgeMinutes > 60;
-  const feedStatusText = fireMode === 'loading' ? 'cargando…' : fireMode === 'error' && fires.length === 0 ? 'no disponible' : `feed hace ${feedAgeMinutes < 1 ? '<1' : Math.floor(feedAgeMinutes)} min${fireMode === 'error' ? ' · última copia' : feedIsStale ? ' · con retraso' : ''}`;
+  const feedStatusText = fireMode === 'loading' ? 'cargando…' : fireMode === 'error' && fires.length === 0 ? 'no disponible' : `${fireMode === 'cache' ? 'copia local · ' : ''}feed hace ${feedAgeMinutes < 1 ? '<1' : Math.floor(feedAgeMinutes)} min${feedIsStale ? ' · con retraso' : ''}`;
   const trafficAgeMinutes = trafficPublishedAt ? Math.max(0, (clock - trafficPublishedAt.getTime()) / 60_000) : Infinity;
-  const trafficStatusText = trafficMode === 'loading' ? 'cargando…' : trafficMode === 'error' ? 'no disponible' : `hace ${trafficAgeMinutes < 1 ? '<1' : Math.floor(trafficAgeMinutes)} min${trafficAgeMinutes > 10 ? ' · con retraso' : ''}`;
+  const trafficStatusText = trafficMode === 'loading' ? 'cargando…' : trafficMode === 'error' ? 'no disponible' : `${trafficMode === 'cache' ? 'copia local · ' : ''}hace ${trafficAgeMinutes < 1 ? '<1' : Math.floor(trafficAgeMinutes)} min${trafficAgeMinutes > 10 ? ' · con retraso' : ''}`;
   const earthquakeAgeMinutes = earthquakeLastSync ? Math.max(0, (clock - earthquakeLastSync.getTime()) / 60_000) : Infinity;
-  const earthquakeStatusText = earthquakeMode === 'loading' ? 'cargando…' : earthquakeMode === 'error' ? 'no disponible' : `hace ${earthquakeAgeMinutes < 1 ? '<1' : Math.floor(earthquakeAgeMinutes)} min`;
+  const earthquakeStatusText = earthquakeMode === 'loading' ? 'cargando…' : earthquakeMode === 'error' ? 'no disponible' : `${earthquakeMode === 'cache' ? 'copia local · ' : ''}hace ${earthquakeAgeMinutes < 1 ? '<1' : Math.floor(earthquakeAgeMinutes)} min`;
   const cataloniaFireAgeMinutes = cataloniaFireLastSync ? Math.max(0, (clock - cataloniaFireLastSync.getTime()) / 60_000) : Infinity;
-  const cataloniaFireStatusText = cataloniaFireMode === 'loading' ? 'cargando…' : cataloniaFireMode === 'error' ? 'no disponible' : `hace ${cataloniaFireAgeMinutes < 1 ? '<1' : Math.floor(cataloniaFireAgeMinutes)} min`;
+  const cataloniaFireStatusText = cataloniaFireMode === 'loading' ? 'cargando…' : cataloniaFireMode === 'error' ? 'no disponible' : `${cataloniaFireMode === 'cache' ? 'copia local · ' : ''}hace ${cataloniaFireAgeMinutes < 1 ? '<1' : Math.floor(cataloniaFireAgeMinutes)} min`;
   const measurement = useMemo(() => measurePath(measurementPoints, measurementElevations), [measurementPoints, measurementElevations]);
 
   useEffect(() => {
@@ -177,11 +178,9 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const firesUrl = import.meta.env.VITE_FIRES_URL || 'https://aulafy.github.io/meteo/fires.json';
-    const loadFires = () => fetch(firesUrl, { cache: 'no-store' }).then(async (response) => {
-        if (!response.ok) throw new Error('FIRMS no disponible');
-        const data = parseFireFeed(await response.json());
-        if (active) { setFires(data.fires); setFireMode('live'); setLastSync(new Date(data.generatedAt)); }
-      }).catch(() => { if (active) setFireMode('error'); });
+    const loadFires = () => loadResilientJson({ key: 'firms-spain', url: firesUrl, parse: parseFireFeed, maxCacheAgeMs: 24 * 60 * 60_000 }).then(({ data, mode }) => {
+      if (active) { setFires(data.fires); setFireMode(mode); setLastSync(new Date(data.generatedAt)); }
+    }).catch(() => { if (active) setFireMode('error'); });
     const onVisibility = () => { if (document.visibilityState === 'visible') loadFires(); };
     loadFires();
     const timer = window.setInterval(loadFires, 15 * 60000);
@@ -192,10 +191,8 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const trafficUrl = import.meta.env.VITE_DGT_URL || '/api/dgt-incidents';
-    const loadTraffic = () => fetch(trafficUrl, { cache: 'no-store' }).then(async (response) => {
-      if (!response.ok) throw new Error('DGT no disponible');
-      const data = parseTrafficFeed(await response.json());
-      if (active) { setTrafficIncidents(data.incidents); setTrafficPublishedAt(new Date(data.publishedAt)); setTrafficMode('live'); }
+    const loadTraffic = () => loadResilientJson({ key: 'dgt-incidents', url: trafficUrl, parse: parseTrafficFeed, maxCacheAgeMs: 2 * 60 * 60_000 }).then(({ data, mode }) => {
+      if (active) { setTrafficIncidents(data.incidents); setTrafficPublishedAt(new Date(data.publishedAt)); setTrafficMode(mode); }
     }).catch(() => { if (active) setTrafficMode('error'); });
     const onVisibility = () => { if (document.visibilityState === 'visible') loadTraffic(); };
     loadTraffic();
@@ -207,12 +204,12 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const loadEarthquakes = () => import('./features/earthquakes/service')
-      .then(({ fetchUsgsEarthquakes }) => fetchUsgsEarthquakes())
-      .then((feed) => {
+      .then(({ parseUsgsEarthquakes, USGS_EARTHQUAKES_URL }) => loadResilientJson({ key: 'usgs-earthquakes', url: USGS_EARTHQUAKES_URL, parse: parseUsgsEarthquakes, maxCacheAgeMs: 48 * 60 * 60_000 }))
+      .then(({ data: feed, mode }) => {
         if (!active) return;
         setEarthquakes(feed.earthquakes);
         setEarthquakeLastSync(new Date(feed.generatedAt));
-        setEarthquakeMode('live');
+        setEarthquakeMode(mode);
       })
       .catch(() => { if (active) setEarthquakeMode('error'); });
     const onVisibility = () => { if (document.visibilityState === 'visible') loadEarthquakes(); };
@@ -225,12 +222,12 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const loadCataloniaFires = () => import('./features/cataloniaFires/service')
-      .then(({ fetchCataloniaFireFeed }) => fetchCataloniaFireFeed())
-      .then((feed) => {
+      .then(({ parseCataloniaFireFeed, CATALONIA_FIRE_FEED_URL }) => loadResilientJson({ key: 'bombers-catalunya', url: CATALONIA_FIRE_FEED_URL, parse: (input, observedAt) => parseCataloniaFireFeed(input, observedAt), maxCacheAgeMs: 12 * 60 * 60_000 }))
+      .then(({ data: feed, mode }) => {
         if (!active) return;
         setCataloniaFires(feed.incidents);
         setCataloniaFireLastSync(new Date(feed.generatedAt));
-        setCataloniaFireMode('live');
+        setCataloniaFireMode(mode);
       })
       .catch(() => { if (active) setCataloniaFireMode('error'); });
     const onVisibility = () => { if (document.visibilityState === 'visible') loadCataloniaFires(); };
@@ -241,12 +238,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!registered || !hasPreciseLocation || !risk.nearestFire || !['alto', 'extremo'].includes(risk.level) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    if (fireMode !== 'live' || !registered || !hasPreciseLocation || !risk.nearestFire || !['alto', 'extremo'].includes(risk.level) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
     const notificationKey = `${risk.nearestFire.id}:${risk.level}`;
     if (notifiedFireRef.current === notificationKey) return;
     notifiedFireRef.current = notificationKey;
     new Notification(`METEO · Riesgo ${risk.level}`, { body: `Detección satelital a ${risk.distanceKm.toFixed(1)} km. Consulta 112 y Protección Civil.`, icon: './favicon.svg', tag: notificationKey });
-  }, [registered, hasPreciseLocation, risk]);
+  }, [fireMode, registered, hasPreciseLocation, risk]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 60000);
@@ -722,7 +719,7 @@ export default function App() {
             available: trafficMode === 'live',
             publishedAt: trafficPublishedAt?.toISOString() ?? null,
             coverage: 'Red estatal excepto Cataluña y País Vasco',
-            incidents: hasSelectedLocation ? nearestTraffic.slice(0, 5).filter((item) => item.distanceKm <= 50).map(({ incident, distanceKm }) => ({ road: incident.road, status: trafficClosureLabel(incident.closure), cause: trafficCauseLabel(incident.cause), municipality: incident.municipality || incident.province, distanceKm: Number(distanceKm.toFixed(1)), updatedAt: incident.updatedAt })) : [],
+            incidents: trafficMode === 'live' && hasSelectedLocation ? nearestTraffic.slice(0, 5).filter((item) => item.distanceKm <= 50).map(({ incident, distanceKm }) => ({ road: incident.road, status: trafficClosureLabel(incident.closure), cause: trafficCauseLabel(incident.cause), municipality: incident.municipality || incident.province, distanceKm: Number(distanceKm.toFixed(1)), updatedAt: incident.updatedAt })) : [],
           },
         }),
       });
@@ -739,7 +736,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><Flame size={20} fill="currentColor" /></div><div><b>METEO</b><span>Alertas y orientación segura</span></div></div>
-      <div className="live"><span /> {feedIsStale ? 'FIRMS CON RETRASO' : fireMode === 'live' ? 'NASA FIRMS ACTUALIZADO' : fireMode === 'loading' ? 'CARGANDO DATOS' : 'FIRMS NO DISPONIBLE'}</div>
+      <div className="live"><span /> {fireMode === 'cache' ? 'COPIA LOCAL · NO EN VIVO' : feedIsStale ? 'FIRMS CON RETRASO' : fireMode === 'live' ? 'NASA FIRMS ACTUALIZADO' : fireMode === 'loading' ? 'CARGANDO DATOS' : 'FIRMS NO DISPONIBLE'}</div>
       <div className="top-actions"><button className="icon-button" aria-label="Configurar notificaciones" onClick={() => setShowRegister(true)}><Bell size={19}/>{registered && <i aria-hidden="true">✓</i>}</button><button className="account" onClick={() => setShowRegister(true)}><UserRound size={18}/><span>{registered ? 'Mis avisos' : 'Registrarme'}</span></button><button className="mobile-menu" aria-label="Abrir panel de información" aria-expanded={mobilePanel} onClick={() => setMobilePanel(!mobilePanel)}><Menu /></button></div>
     </header>
 
@@ -750,17 +747,19 @@ export default function App() {
           <div className="eyebrow"><Radio size={14}/> {locationKind === 'gps' ? 'RIESGO EN TU UBICACIÓN' : locationKind === 'search' ? `CONSULTA · ${locationLabel}` : 'VISTA GENERAL · ELIGE UNA UBICACIÓN'}</div>
           <div className="risk-heading"><div><strong>{hasSelectedLocation ? risk.level : 'sin ubicación'}</strong><span>{hasSelectedLocation ? `Índice ${risk.score}/100` : 'Riesgo pendiente'}</span></div><div className="risk-gauge"><span style={{ transform: `rotate(${hasSelectedLocation ? Math.min(180, risk.score * 1.8) : 0}deg)` }}/></div></div>
           <p>{!hasSelectedLocation ? 'Usa el GPS o busca un municipio para calcular proximidad.' : risk.level === 'alto' || risk.level === 'extremo' ? 'Detección cercana que requiere atención inmediata. No evacúes sin instrucciones oficiales.' : 'Mantente atento a las indicaciones oficiales y a cualquier cambio en las condiciones.'}</p>
+          {fireMode === 'cache' && <p className="source-cache-warning">FIRMS no responde: el mapa y este cálculo usan la última copia válida. No se enviarán alertas ni se consultará la IA hasta recuperar datos en vivo.</p>}
           {hasSelectedLocation && <ul className="risk-reasons">{risk.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
           {hasSelectedLocation && <div className={`decision-card urgency-${actionGuidance.urgency}`}><small>{locationKind === 'search' ? 'ORIENTACIÓN PARA ESTA ZONA' : 'QUÉ HACER AHORA'}</small><b>{actionGuidance.title}</b><p>{actionGuidance.message}</p><ol>{actionGuidance.steps.map(step=><li key={step}>{step}</li>)}</ol></div>}
           <div className="chips"><span><Wind size={14}/> {weather.available ? `${weather.windSpeed.toFixed(0)} km/h` : '—'}</span><span><CloudRain size={14}/> {weather.available ? `${weather.humidity.toFixed(0)}%` : '—'}</span><span><Thermometer size={14}/> {weather.available ? `${weather.temperature.toFixed(0)}°` : '—'}</span></div>
           {hasSelectedLocation && risk.nearestFire && <div className="satellite-note"><AlertTriangle size={15}/><span><b>Detección satelital, no incendio confirmado.</b> Confianza {risk.nearestFire.confidence}%{risk.nearestFire.frp != null ? ` · ${risk.nearestFire.frp.toFixed(1)} MW` : ''}.</span></div>}
           {hasSelectedLocation && <div className="evacuation-status"><Route/><div><small>RUTA DE EVACUACIÓN</small><b>{referenceRoute ? 'Ruta local visible · no verificada' : 'No hay una ruta oficial disponible'}</b><span>{referenceRoute ? 'No incorpora todos los cortes, perímetros ni órdenes oficiales.' : 'METEO no va a inventar una salida. Sigue ES‑Alert, 112 y a los agentes.'}</span></div></div>}
-          <button className="ai-button" disabled={fires.length === 0} onClick={explainRisk}><Bot size={17}/> {hasSelectedLocation ? 'Ver los 3 focos más cercanos con IA' : 'Ver los 5 focos más recientes con IA'}</button>
+          <button className="ai-button" disabled={fires.length === 0 || fireMode === 'cache'} onClick={explainRisk}><Bot size={17}/> {hasSelectedLocation ? 'Ver los 3 focos más cercanos con IA' : 'Ver los 5 focos más recientes con IA'}</button>
           {(risk.level === 'alto' || risk.level === 'extremo') && <div className="what-now"><b>Qué hacer ahora</b><ol><li>Consulta 112 y Protección Civil.</li><li>Prepara medicación, documentación, agua y animales.</li><li>No conduzcas hacia humo o fuego ni improvises una ruta.</li></ol><div><a href="https://www.112.es/consejos/incendio-forestal.html" target="_blank" rel="noreferrer">Consejos 112 <ExternalLink size={12}/></a><a href="https://www.dgt.es/conoce-el-estado-del-trafico/informacion-e-incidencias-de-trafico/index.html" target="_blank" rel="noreferrer">Estado DGT <ExternalLink size={12}/></a></div></div>}
         </section>
 
         <section className="panel-section">
           <div className="section-title"><div><h2>Detecciones cercanas</h2><span>NASA FIRMS · {feedStatusText}</span></div><button onClick={() => mapRef.current?.fitBounds([[-9.6,35.7],[4.5,43.9]], {padding:50})}>Ver España</button></div>
+          {fireMode === 'cache' && <p className="source-cache-warning">Copia local de contexto: puede faltar un foco reciente o mostrarse uno ya extinguido.</p>}
           {fires.length === 0 && <p className="route-copy">{fireMode === 'error' ? 'FIRMS no está disponible. La ausencia de puntos no significa ausencia de fuego.' : 'Sin detecciones satelitales recientes en España.'}</p>}
           {nearestFires.slice(0,3).map(({ fire, distanceKm }, i) => <button className="fire-row" key={fire.id} onClick={() => mapRef.current?.flyTo({center:fire.coordinates,zoom:13})}>
             <span className={`fire-icon fire-${i}`}><Flame size={17} fill="currentColor"/></span><div><b>{fire.name}</b><small>{fire.source}{fire.frp != null ? ` · ${fire.frp.toFixed(1)} MW` : ''} · {fireAgeLabel(fire.detectedAt, clock)}{isActionableFire(fire, clock) ? '' : ' · solo contexto'}</small></div><strong>{hasSelectedLocation ? `${distanceKm.toFixed(1)} km` : 'Ver foco'}</strong><ChevronRight size={17}/>
@@ -786,7 +785,8 @@ export default function App() {
         <section className="panel-section traffic-section">
           <div className="section-title"><div><h2>Carreteras afectadas</h2><span>DGT DATEX II · {trafficStatusText}</span></div><button onClick={() => setShowMapLayers(true)}>Ver capa</button></div>
           {trafficMode === 'error' && <p className="route-copy">La DGT no está disponible. METEO no puede confirmar qué carreteras están abiertas.</p>}
-          {trafficMode === 'live' && trafficForPanel.length === 0 && <p className="route-copy">Sin cortes en la selección recibida. Esto no garantiza que todas las vías estén abiertas.</p>}
+          {trafficMode === 'cache' && <p className="source-cache-warning">Copia local: no confirma que una vía siga cortada ni que esté abierta ahora.</p>}
+          {(trafficMode === 'live' || trafficMode === 'cache') && trafficForPanel.length === 0 && <p className="route-copy">Sin cortes en la copia disponible. Esto no garantiza que las vías estén abiertas.</p>}
           {trafficForPanel.slice(0, 4).map(({ incident, distanceKm }) => <button className={`traffic-row closure-${incident.closure}`} key={incident.id} onClick={() => mapRef.current?.flyTo({ center: incident.coordinates[0], zoom: 13 })}><span className="traffic-road">{incident.road}</span><span><b>{trafficClosureLabel(incident.closure)}</b><small>{trafficCauseLabel(incident.cause)} · {incident.municipality || incident.province || 'Red DGT'} · act. {new Date(incident.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</small></span>{hasSelectedLocation && <strong>{distanceKm.toFixed(1)} km</strong>}</button>)}
           <p className="traffic-coverage">Red estatal excepto Cataluña y País Vasco. No incluye necesariamente calles, caminos forestales ni controles locales.</p>
         </section>
@@ -837,9 +837,9 @@ export default function App() {
           <label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label>
           <label className="map-layer-switch"><span><b>Imagen satelital</b><small>Esri · imagen contextual, no en tiempo real</small></span><input type="checkbox" checked={satelliteEnabled} onChange={(event) => setSatelliteEnabled(event.target.checked)}/></label>
           {satelliteEnabled && <label className="layer-opacity-control"><span>Opacidad de imagen <b>{satelliteOpacity}%</b></span><input aria-label="Opacidad de imagen satelital" type="range" min="0" max="100" step="1" value={satelliteOpacity} onChange={(event) => setSatelliteOpacity(Number(event.target.value))}/></label>}
-          <label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias oficiales normalizadas` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label>
-          <label className="map-layer-switch"><span><b>Actuaciones Bombers Catalunya</b><small>{cataloniaFireMode === 'live' ? `${operationalCataloniaFires.length} actuaciones no extinguidas · ${cataloniaFireStatusText}` : cataloniaFireMode === 'loading' ? 'Cargando servicio oficial…' : 'Bombers no disponible'}</small></span><input type="checkbox" disabled={cataloniaFireMode === 'error' && cataloniaFires.length === 0} checked={cataloniaFireLayerEnabled} onChange={(event) => setCataloniaFireLayerEnabled(event.target.checked)}/></label>
-          <label className="map-layer-switch"><span><b>Terremotos USGS</b><small>{earthquakeMode === 'live' ? `${earthquakes.length} eventos globales · 24 h · ${earthquakeStatusText}` : earthquakeMode === 'loading' ? 'Cargando feed GeoJSON oficial…' : 'USGS no disponible'}</small></span><input type="checkbox" disabled={earthquakeMode === 'error' && earthquakes.length === 0} checked={earthquakeLayerEnabled} onChange={(event) => setEarthquakeLayerEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Cortes y afecciones DGT</b><small>{trafficMode === 'live' || trafficMode === 'cache' ? `${trafficIncidents.length} incidencias · ${trafficStatusText}` : trafficMode === 'loading' ? 'Cargando DATEX II…' : 'DGT no disponible'}</small></span><input type="checkbox" checked={dgtLayerEnabled} onChange={(event) => setDgtLayerEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Actuaciones Bombers Catalunya</b><small>{cataloniaFireMode === 'live' || cataloniaFireMode === 'cache' ? `${operationalCataloniaFires.length} actuaciones no extinguidas · ${cataloniaFireStatusText}` : cataloniaFireMode === 'loading' ? 'Cargando servicio oficial…' : 'Bombers no disponible'}</small></span><input type="checkbox" disabled={cataloniaFireMode === 'error' && cataloniaFires.length === 0} checked={cataloniaFireLayerEnabled} onChange={(event) => setCataloniaFireLayerEnabled(event.target.checked)}/></label>
+          <label className="map-layer-switch"><span><b>Terremotos USGS</b><small>{earthquakeMode === 'live' || earthquakeMode === 'cache' ? `${earthquakes.length} eventos globales · 24 h · ${earthquakeStatusText}` : earthquakeMode === 'loading' ? 'Cargando feed GeoJSON oficial…' : 'USGS no disponible'}</small></span><input type="checkbox" disabled={earthquakeMode === 'error' && earthquakes.length === 0} checked={earthquakeLayerEnabled} onChange={(event) => setEarthquakeLayerEnabled(event.target.checked)}/></label>
           {earthquakeLayerEnabled && <div className="earthquake-layer-context"><Activity/><span><b>Capa sísmica independiente</b><small>Magnitud y profundidad publicadas por USGS. No modifica el riesgo de incendio ni equivale a una alerta de tsunami.</small></span><div className="earthquake-layer-actions"><button type="button" onClick={() => mapRef.current?.fitBounds([[-179, -65], [179, 75]], { padding: 28 })}>Ver mundo</button>{strongestEarthquake && <button type="button" onClick={() => mapRef.current?.flyTo({ center: strongestEarthquake.coordinates, zoom: 12 })}>Mayor M{strongestEarthquake.magnitude.toFixed(1)}</button>}</div></div>}
           <label className="map-layer-switch"><span><b>Peligro meteorológico EFFIS</b><small>Índice FWI diario modelado · no es un incendio</small></span><input type="checkbox" checked={effisFwiEnabled} onChange={(event) => setEffisFwiEnabled(event.target.checked)}/></label>
           {effisFwiEnabled && <label className="layer-opacity-control"><span>Opacidad FWI <b>{effisFwiOpacity}%</b></span><input aria-label="Opacidad del peligro meteorológico EFFIS" type="range" min="0" max="100" step="1" value={effisFwiOpacity} onChange={(event) => setEffisFwiOpacity(Number(event.target.value))}/></label>}
@@ -854,8 +854,8 @@ export default function App() {
           <button className="map-export" onClick={printSituationReport}><Printer/> Imprimir parte de situación</button>
           <p>FIRMS, Bombers, EFFIS, DGT y USGS son fuentes independientes. Una actuación de Bombers no es un perímetro; un terremoto no implica una alerta de tsunami. Ninguna capa genera una orden o ruta de evacuación.</p>
         </section>}
-        <section className="print-report" aria-hidden="true"><h1>METEO · Parte de situación</h1><p>Generado {new Date(clock).toLocaleString('es-ES')} · Zona consultada: {hasSelectedLocation ? locationLabel : 'España (sin ubicación compartida)'}</p><div><b>NASA FIRMS</b><span>{visibleFires.length} detecciones térmicas visibles · ventana {fireTimeWindow} h</span></div><div><b>Bombers Catalunya</b><span>{operationalCataloniaFires.length} actuaciones de vegetación no extinguidas recibidas</span></div><div><b>DGT</b><span>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias recibidas` : 'Fuente no disponible'}</span></div><div><b>Contexto</b><span>Viento {weather.available ? `${weather.windSpeed.toFixed(0)} km/h · humedad ${weather.humidity.toFixed(0)}% · ${weather.temperature.toFixed(0)} °C` : 'no disponible'}</span></div><strong>Documento informativo, no orden oficial</strong><small>FIRMS son anomalías térmicas, no incendios confirmados. Las actuaciones de Bombers no son perímetros. METEO no certifica rutas ni carreteras abiertas. Sigue ES-Alert, 112 y las autoridades.</small></section>
-        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span>{cataloniaFireLayerEnabled && <span><i className="catalonia-fire-dot"/> Bombers CAT {operationalCataloniaFires.length}</span>}<span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span>{earthquakeLayerEnabled && <span><i className="earthquake-dot"/> USGS {earthquakes.length} · 24 h</span>}{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
+        <section className="print-report" aria-hidden="true"><h1>METEO · Parte de situación</h1><p>Generado {new Date(clock).toLocaleString('es-ES')} · Zona consultada: {hasSelectedLocation ? locationLabel : 'España (sin ubicación compartida)'}</p><div><b>NASA FIRMS</b><span>{visibleFires.length} detecciones térmicas visibles · ventana {fireTimeWindow} h · {fireMode === 'cache' ? 'copia local' : fireMode === 'live' ? 'en vivo' : 'fuente no disponible'}</span></div><div><b>Bombers Catalunya</b><span>{operationalCataloniaFires.length} actuaciones · {cataloniaFireMode === 'cache' ? 'copia local' : cataloniaFireMode === 'live' ? 'en vivo' : 'fuente no disponible'}</span></div><div><b>DGT</b><span>{trafficMode === 'live' || trafficMode === 'cache' ? `${trafficIncidents.length} incidencias · ${trafficMode === 'cache' ? 'copia local' : 'en vivo'}` : 'Fuente no disponible'}</span></div><div><b>Contexto</b><span>Viento {weather.available ? `${weather.windSpeed.toFixed(0)} km/h · humedad ${weather.humidity.toFixed(0)}% · ${weather.temperature.toFixed(0)} °C` : 'no disponible'}</span></div><strong>Documento informativo, no orden oficial</strong><small>FIRMS son anomalías térmicas, no incendios confirmados. Las actuaciones de Bombers no son perímetros. METEO no certifica rutas ni carreteras abiertas. Las copias locales pueden estar desactualizadas. Sigue ES-Alert, 112 y las autoridades.</small></section>
+        <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h{fireMode === 'cache' ? ' · copia' : ''}</span>{cataloniaFireLayerEnabled && <span><i className="catalonia-fire-dot"/> Bombers CAT {operationalCataloniaFires.length}{cataloniaFireMode === 'cache' ? ' · copia' : ''}</span>}<span><i className="traffic-dot"/> DGT {trafficMode === 'live' || trafficMode === 'cache' ? trafficIncidents.length : '—'}{trafficMode === 'cache' ? ' · copia' : ''}</span>{earthquakeLayerEnabled && <span><i className="earthquake-dot"/> USGS {earthquakes.length} · 24 h{earthquakeMode === 'cache' ? ' · copia' : ''}</span>}{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
         {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local">
           <div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div>
           <div className="route-playback"><button className="route-play" onClick={toggleRoutePlayback} aria-label={routePlaying ? 'Pausar animación' : 'Reproducir animación'}>{routePlaying ? <Pause/> : <Play/>}</button><label><span>Progreso <b>{Math.round(routeProgress * 100)}%</b></span><input aria-label="Progreso de la ruta" type="range" min="0" max="1" step="0.001" value={routeProgress} onChange={(event) => { setRoutePlaying(false); setRouteProgress(Number(event.target.value)); }}/></label></div>
