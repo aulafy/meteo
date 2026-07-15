@@ -2,6 +2,21 @@
 
 Aplicación web de inteligencia meteorológica, detección temprana de incendios, orientación para residentes y alertas por proximidad. Sigue el stack geoespacial web de [GeoLibre](https://github.com/opengeos/GeoLibre): React, TypeScript, MapLibre GL y capas GeoJSON.
 
+## Tutorial técnico en español
+
+El repositorio incluye una ruta de 12 etapas para reconstruir la aplicación desde
+cero: [Construye una demo SaaS geoespacial con APIs e IA](docs/tutorial/README.md).
+Cada capítulo termina con pruebas, evidencia, fallos esperados y una advertencia de
+coste o seguridad. Está orientado a perfiles técnicos; las primeras cinco etapas
+funcionan sin Supabase, Vercel ni clave de IA.
+
+La ruta conecta el proyecto con los temas de Aulafy sobre
+[RLS](https://www.aulafy.net/cursos/crear-webs-con-ia/supabase-rls),
+[seguridad](https://www.aulafy.net/cursos/crear-webs-con-ia/seguridad-privacidad-legal),
+[Vercel](https://www.aulafy.net/cursos/crear-webs-con-ia/vercel-preview-produccion),
+[IA protegida](https://www.aulafy.net/cursos/crear-webs-con-ia/chatbot-groq-seguro) y
+[demos SaaS](https://www.aulafy.net/cursos/crear-webs-con-ia/taller-app-saas).
+
 ## Arranque
 
 ```bash
@@ -10,6 +25,12 @@ npm run dev
 ```
 
 Abre `http://localhost:5173`. La geolocalización necesita permiso del navegador. Si se deniega, METEO mantiene la vista general de España y no presenta distancias ni riesgo como si fueran personales.
+
+Antes de modificar o publicar:
+
+```bash
+npm run check
+```
 
 ## Datos
 
@@ -55,13 +76,30 @@ El endpoint servidor `/api/ai-guidance` convierte únicamente la evaluación est
 
 El proyecto está preparado para Vercel mediante `vercel.json`. Las detecciones FIRMS se publican cada 15 minutos en el feed estático de GitHub Pages y la aplicación desplegada en Vercel consume ese feed sin exponer la clave de NASA. Puede configurarse otro feed mediante `VITE_FIRES_URL`.
 
+> **Costes y licencias:** Open-Meteo reserva su API gratuita para uso no comercial
+> dentro de los límites publicados. Una demo SaaS, una web con anuncios o un
+> producto comercial debe contratar un plan compatible o autoalojar el servicio.
+> Revisa [precios](https://open-meteo.com/en/pricing) y
+> [términos](https://open-meteo.com/en/terms) antes de publicar.
+
 ### Web Push remoto
 
 El directorio `api/` contiene funciones Vercel para suscribir dispositivos y evaluar alertas. Aplica en orden `supabase/migrations/001_push_alerts.sql` y `supabase/migrations/002_fire_observations.sql` en un proyecto Supabase con PostGIS y configura las variables de `.env.example` en Vercel. Genera las claves mediante `npx web-push generate-vapid-keys`.
 
 El endpoint protegido `GET /api/cron/evaluate-alerts` debe invocarse con `Authorization: Bearer $CRON_SECRET` cada 15 minutos. Ingiere y audita FIRMS en PostGIS. La función SQL `pending_alert_candidates` selecciona mediante `ST_DWithin` la observación más próxima a cada dispositivo, con confianza mínima del 70%, una antigüedad máxima de 12 horas y dentro del radio consentido. Deduplica entregas y desactiva suscripciones expiradas.
 
+> **Plan de Vercel:** Cron Jobs en Hobby admite actualmente como mínimo una
+> ejecución diaria y no sirve para este intervalo de 15 minutos. Para alertas 24/7
+> necesitas un plan compatible o un programador externo que proteja el endpoint
+> con `CRON_SECRET`. Confirma siempre los
+> [límites vigentes](https://vercel.com/docs/cron-jobs/usage-and-pricing).
+
 Los endpoints de IA, suscripciones y DGT aplican límites básicos por IP dentro de cada instancia servidor. Para una campaña pública deben complementarse con límites distribuidos o firewall en Vercel; el control local no sustituye esa protección.
+
+Antes de aceptar usuarios, completa la matriz de
+[costes, seguridad y escala](docs/tutorial/10-costes-seguridad-escala.md). El coste
+crece por invocaciones, transferencia, cómputo de Supabase, frecuencia del cron y
+tokens de IA aunque cada proveedor ofrezca una cuota inicial.
 
 La persona puede desactivar los avisos desde la propia app; esto elimina la suscripción y su ubicación. Como límite adicional, el evaluador elimina automáticamente suscripciones que lleven 180 días sin renovarse, observaciones con más de 30 días, auditorías de ingesta con más de 90 días y entregas con más de 365 días. La [documentación de backend](docs/supabase-backend.md) detalla el modelo de seguridad y el orden de despliegue.
 
