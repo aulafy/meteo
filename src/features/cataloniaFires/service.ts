@@ -7,7 +7,7 @@ const ARCGIS_LAYER_URL = 'https://services7.arcgis.com/ZCqVt1fRXwwK6GF4/arcgis/r
 const query = new URLSearchParams({
   f: 'geojson',
   where: '1=1',
-  outFields: 'ACT_NUM_ACTUACIO,TAL_DESC_ALARMA2,COM_FASE,ACT_NUM_VEH,ACT_DAT_ACTUACIO,ACT_DAT_INICI,DATA_ACT,MUNICIPI_DPX',
+  outFields: 'ESRI_OID,GlobalID,TAL_DESC_ALARMA2,COM_FASE,ACT_NUM_VEH,ACT_DAT_ACTUACIO,ACT_DAT_INICI,DATA_ACT,MUNICIPI_DPX',
   returnGeometry: 'true',
   outSR: '4326',
   resultRecordCount: '2000',
@@ -27,7 +27,11 @@ const featureSchema = z.object({
     coordinates: z.tuple([z.number().finite(), z.number().finite()]),
   }),
   properties: z.object({
-    ACT_NUM_ACTUACIO: z.string().min(1).max(64),
+    // ACT_NUM_ACTUACIO was removed from the public layer in July 2026.
+    // GlobalID/ESRI_OID identify current rows; retain the old field for cached feeds.
+    ACT_NUM_ACTUACIO: z.string().min(1).max(128).optional(),
+    ESRI_OID: z.number().int().nonnegative().optional(),
+    GlobalID: z.string().min(1).max(128).optional(),
     TAL_DESC_ALARMA2: z.string().max(160).nullish(),
     COM_FASE: z.string().max(40).nullish(),
     ACT_NUM_VEH: z.number().int().min(0).max(500).nullish(),
@@ -35,7 +39,7 @@ const featureSchema = z.object({
     ACT_DAT_INICI: z.number().finite().positive().nullish(),
     DATA_ACT: z.number().finite().positive(),
     MUNICIPI_DPX: z.string().max(120).nullish(),
-  }),
+  }).refine((properties) => properties.GlobalID || properties.ESRI_OID != null || properties.ACT_NUM_ACTUACIO, 'Actuación sin identificador'),
 });
 
 const phaseByLabel: Record<string, CataloniaFirePhase> = {
@@ -62,8 +66,9 @@ export function parseCataloniaFireFeed(input: unknown, generatedAt = Date.now())
     const [longitude, latitude] = geometry.coordinates;
     // The public layer occasionally contains placeholder geometry. Only retain Catalonia.
     if (longitude < 0.05 || longitude > 3.4 || latitude < 40.45 || latitude > 42.9) continue;
+    const sourceId = properties.GlobalID ?? (properties.ESRI_OID != null ? String(properties.ESRI_OID) : properties.ACT_NUM_ACTUACIO);
     const incident: CataloniaFireIncident = {
-      id: `bombers-cat-${properties.ACT_NUM_ACTUACIO}`,
+      id: `bombers-cat-${sourceId}`,
       coordinates: [longitude, latitude],
       municipality: properties.MUNICIPI_DPX?.trim() || 'Municipio no publicado',
       kind: properties.TAL_DESC_ALARMA2?.trim() || 'Incendio de vegetación',

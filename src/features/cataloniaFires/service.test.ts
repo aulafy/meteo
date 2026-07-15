@@ -6,7 +6,8 @@ const feature = (overrides: Record<string, unknown> = {}) => ({
   type: 'Feature',
   geometry: { type: 'Point', coordinates: [2.1, 41.5] },
   properties: {
-    ACT_NUM_ACTUACIO: '260000001',
+    GlobalID: 'current-global-id',
+    ESRI_OID: 260000001,
     TAL_DESC_ALARMA2: 'Incendi vegetació forestal',
     COM_FASE: 'Estabilitzat',
     ACT_NUM_VEH: 7,
@@ -27,11 +28,19 @@ describe('adaptador de actuaciones de Bombers Catalunya', () => {
     expect(feed.incidents[0]).not.toHaveProperty('intensity');
   });
 
+  it('usa el identificador global actual de ArcGIS y conserva compatibilidad con el campo antiguo', () => {
+    const current = parseCataloniaFireFeed({ type: 'FeatureCollection', features: [feature()] }).incidents[0];
+    const legacyFeature = feature({ GlobalID: undefined, ESRI_OID: undefined, ACT_NUM_ACTUACIO: 'legacy-42' });
+    const legacy = parseCataloniaFireFeed({ type: 'FeatureCollection', features: [legacyFeature] }).incidents[0];
+    expect(current.id).toBe('bombers-cat-current-global-id');
+    expect(legacy.id).toBe('bombers-cat-legacy-42');
+  });
+
   it('descarta geometrías placeholder y conserva solo la versión más reciente de una actuación', () => {
     const feed = parseCataloniaFireFeed({ type: 'FeatureCollection', features: [
       feature({ DATA_ACT: Date.parse('2026-07-14T10:00:00Z'), COM_FASE: null }),
       feature({ DATA_ACT: Date.parse('2026-07-14T12:00:00Z'), COM_FASE: 'Controlat' }),
-      { ...feature(), geometry: { type: 'Point', coordinates: [-1.48, 0] }, properties: { ...feature().properties, ACT_NUM_ACTUACIO: 'invalid' } },
+      { ...feature(), geometry: { type: 'Point', coordinates: [-1.48, 0] }, properties: { ...feature().properties, GlobalID: 'invalid' } },
     ] });
     expect(feed.incidents).toHaveLength(1);
     expect(feed.incidents[0].phase).toBe('controlled');
@@ -56,6 +65,9 @@ describe('adaptador de actuaciones de Bombers Catalunya', () => {
     const feed = await fetchCataloniaFireFeed(mockFetch);
     expect(mockFetch).toHaveBeenCalledWith(CATALONIA_FIRE_FEED_URL, { cache: 'no-store' });
     expect(CATALONIA_FIRE_FEED_URL).toContain('services7.arcgis.com/ZCqVt1fRXwwK6GF4');
+    expect(CATALONIA_FIRE_FEED_URL).toContain('GlobalID');
+    expect(CATALONIA_FIRE_FEED_URL).toContain('ESRI_OID');
+    expect(CATALONIA_FIRE_FEED_URL).not.toContain('ACT_NUM_ACTUACIO');
     expect(feed.incidents).toHaveLength(1);
   });
 });

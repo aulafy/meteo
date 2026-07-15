@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { type ApiRequest, type ApiResponse, enforceRateLimit, json } from './_lib.js';
 
-const inputSchema = z.object({
+export const aiInputSchema = z.object({
   locationProvided: z.boolean(),
   locationLabel: z.string().max(160).nullable(),
-  riskLevel: z.enum(['bajo', 'moderado', 'alto', 'extremo']),
-  riskScore: z.number().min(0).max(100),
+  riskLevel: z.enum(['bajo', 'moderado', 'alto', 'extremo']).nullable(),
+  riskScore: z.number().min(0).max(100).nullable(),
   distanceKm: z.number().nonnegative().nullable(),
   confidence: z.number().min(0).max(100).nullable(),
   frp: z.number().nonnegative().nullable(),
@@ -43,11 +43,20 @@ const inputSchema = z.object({
     })).max(5),
   }),
 }).superRefine((value, context) => {
-  if (value.locationProvided && value.fires.length > 3) context.addIssue({ code: 'custom', path: ['fires'], message: 'Solo se admiten los tres focos más cercanos' });
-  if (!value.locationProvided && value.fires.some((fire) => fire.distanceKm !== null)) context.addIssue({ code: 'custom', path: ['fires'], message: 'No debe calcularse distancia sin ubicación' });
+  if (value.locationProvided) {
+    if (value.fires.length > 3) context.addIssue({ code: 'custom', path: ['fires'], message: 'Solo se admiten los tres focos más cercanos' });
+    if (value.riskLevel === null) context.addIssue({ code: 'custom', path: ['riskLevel'], message: 'Falta el nivel orientativo para la ubicación' });
+    if (value.riskScore === null) context.addIssue({ code: 'custom', path: ['riskScore'], message: 'Falta el índice orientativo para la ubicación' });
+    return;
+  }
+  if (value.locationLabel !== null) context.addIssue({ code: 'custom', path: ['locationLabel'], message: 'No debe existir una etiqueta sin ubicación' });
+  if (value.riskLevel !== null || value.riskScore !== null) context.addIssue({ code: 'custom', path: ['riskLevel'], message: 'No debe calcularse riesgo sin ubicación' });
+  if (value.distanceKm !== null || value.confidence !== null || value.frp !== null) context.addIssue({ code: 'custom', path: ['distanceKm'], message: 'No debe calcularse proximidad sin ubicación' });
+  if (value.fires.some((fire) => fire.distanceKm !== null)) context.addIssue({ code: 'custom', path: ['fires'], message: 'No debe calcularse distancia sin ubicación' });
+  if (value.reasons.length > 0 || value.traffic.incidents.length > 0) context.addIssue({ code: 'custom', path: ['reasons'], message: 'No debe atribuirse contexto local sin ubicación' });
 });
 
-type AiSituation = z.infer<typeof inputSchema>;
+type AiSituation = z.infer<typeof aiInputSchema>;
 
 export function googleMapsLink(coordinates: [number, number]) {
   const [longitude, latitude] = coordinates;
@@ -69,10 +78,26 @@ export function buildFireOverview(situation: Pick<AiSituation, 'locationProvided
   return `${heading}\n${rows.join('\n')}`;
 }
 
+export function buildNoLocationGuidance(situation: Pick<AiSituation, 'locationProvided' | 'locationLabel' | 'fires'>) {
+  const fireOverview = buildFireOverview(situation);
+  return `${fireOverview}
+
+Ruta: METEO no dispone de una ruta de evacuación oficial o verificada.
+DGT: sin ubicación no se ha calculado proximidad a incidencias de tráfico.
+
+Situación verificada: este es un listado nacional de detecciones térmicas recientes de NASA FIRMS. No se ha calculado un nivel de riesgo para ninguna persona o municipio.
+
+Ruta y carreteras: sin una ubicación y sin órdenes oficiales, METEO no puede determinar una ruta, un destino seguro ni qué carreteras sirven para evacuar.
+
+Qué hacer ahora: elige un municipio o activa el GPS para calcular proximidad. Ante humo denso, llamas, una orden oficial o peligro inmediato, llama al 112 y sigue a los agentes.
+
+Lo que falta confirmar: NASA FIRMS detecta anomalías térmicas y no confirma por sí sola incendios, perímetros, propagación ni órdenes de evacuación.`;
+}
+
 export const AI_SYSTEM_PROMPT = `Eres el asistente de situación de METEO para incendios forestales en España. Responde en español claro, breve y accionable, sin Markdown, asteriscos ni adornos. Usa exclusivamente el JSON suministrado y separa hechos de limitaciones.
 
 Reglas obligatorias:
-1. riskLevel es un nivel orientativo calculado por METEO, no un riesgo oficial. NASA FIRMS detecta anomalías térmicas y no confirma por sí sola un incendio.
+1. Con ubicación, riskLevel es un nivel orientativo calculado por METEO, no un riesgo oficial. Sin ubicación, riskLevel y riskScore son null y está prohibido anunciar o inferir cualquier nivel, índice o puntuación de riesgo. NASA FIRMS detecta anomalías térmicas y no confirma por sí sola un incendio.
 2. Si route.verified es false, METEO NO dispone de una ruta de evacuación verificada. Si route.state es local-reference, di que la línea mostrada fue importada por el usuario y no valida seguridad. Nunca ordenes seguirla ni la llames ruta segura.
 3. Solo menciona cortes o afecciones incluidos en traffic.incidents. Distingue carretera cortada, calzada cerrada, carril cerrado y cortes intermitentes. Si traffic.available es false, di que no se pudo consultar DGT. Si locationProvided es true y la lista está vacía, di que no hay afecciones cercanas en los datos entregados; nunca concluyas que todas las carreteras están abiertas. Sin ubicación, no hagas afirmaciones de proximidad.
 4. Los datos DGT no cubren Cataluña ni País Vasco y no incluyen necesariamente calles locales, caminos forestales, perímetros, controles policiales, refugios u órdenes de evacuación.
@@ -86,11 +111,16 @@ Orden de la explicación posterior al listado: Situación verificada; Ruta y car
 export default async function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== 'POST') return json(response, { error: 'Método no permitido' }, 405);
   if (!enforceRateLimit(request, response, { namespace: 'ai-guidance', limit: 12, windowMs: 60_000 })) return;
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return json(response, { error: 'Asistente no configurado' }, 503);
 
   try {
-    const situation = inputSchema.parse(request.body);
+    const situation = aiInputSchema.parse(request.body);
+    if (!situation.locationProvided) return json(response, {
+      guidance: buildNoLocationGuidance(situation),
+      model: 'METEO',
+      disclaimer: 'Apoyo informativo; no sustituye a 112 ni a las autoridades.',
+    });
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) return json(response, { error: 'Asistente no configurado' }, 503);
     const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

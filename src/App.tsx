@@ -91,6 +91,7 @@ export default function App() {
   const [cataloniaFireLastSync, setCataloniaFireLastSync] = useState<Date | null>(null);
   const notifiedFireRef = useRef('');
   const [aiGuidance, setAiGuidance] = useState('');
+  const [aiSource, setAiSource] = useState('METEO');
   const [aiLoading, setAiLoading] = useState(false);
   const [showAi, setShowAi] = useState(false);
   const [showRouteImport, setShowRouteImport] = useState(false);
@@ -629,14 +630,15 @@ export default function App() {
   }
 
   async function explainRisk() {
-    setShowAi(true); setAiLoading(true); setAiGuidance('');
+    setShowAi(true); setAiLoading(true); setAiGuidance(''); setAiSource('METEO');
     try {
       const response = await fetch('/api/ai-guidance', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           locationProvided: hasSelectedLocation,
           locationLabel: hasSelectedLocation ? locationLabel : null,
-          riskLevel: risk.level, riskScore: risk.score,
+          riskLevel: hasSelectedLocation ? risk.level : null,
+          riskScore: hasSelectedLocation ? risk.score : null,
           distanceKm: hasSelectedLocation && Number.isFinite(risk.distanceKm) ? Number(risk.distanceKm.toFixed(1)) : null,
           confidence: hasSelectedLocation ? risk.nearestFire?.confidence ?? null : null, frp: hasSelectedLocation && risk.nearestFire?.frp != null ? Number(risk.nearestFire.frp.toFixed(1)) : null,
           weather: { available: hasSelectedLocation && weather.available, temperature: Number(weather.temperature.toFixed(1)), humidity: Number(weather.humidity.toFixed(0)), windSpeed: Number(weather.windSpeed.toFixed(0)), windDirection: Number(weather.windDirection.toFixed(0)) },
@@ -658,9 +660,9 @@ export default function App() {
           },
         }),
       });
-      const data = await response.json() as { guidance?: string; error?: string };
+      const data = await response.json() as { guidance?: string; model?: string; error?: string };
       if (!response.ok || !data.guidance) throw new Error(data.error || 'Asistente no disponible');
-      setAiGuidance(data.guidance);
+      setAiGuidance(data.guidance); setAiSource(data.model || 'METEO');
     } catch (error) {
       setAiGuidance(error instanceof Error ? error.message : 'Asistente no disponible');
     } finally { setAiLoading(false); }
@@ -797,7 +799,7 @@ export default function App() {
 
     {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
     {showRegister && <div className="modal-backdrop" onClick={() => setShowRegister(false)}><form className="modal" role="dialog" aria-modal="true" aria-labelledby="register-dialog-title" onClick={(e)=>e.stopPropagation()} onSubmit={activateLocalAlerts}><button type="button" className="modal-x" aria-label="Cerrar gestión de avisos" onClick={()=>setShowRegister(false)}><X/></button><div className="modal-icon"><Bell/></div><h2 id="register-dialog-title">{registered ? 'Gestiona tus avisos' : 'Activa avisos de proximidad'}</h2><p>{remoteRegistered ? 'Los avisos remotos 24/7 están activos en este dispositivo.' : 'METEO registrará este dispositivo para comprobar cada 15 minutos si existe una detección de alta confianza en un radio de 25 km. Es un canal complementario y no sustituye ES‑Alert ni a las autoridades.'}</p><p className="privacy-note">Si activas el canal 24/7 se guardarán la ubicación GPS, el radio y el identificador push de este dispositivo. Puedes eliminarlos desde este mismo panel. <a href="https://github.com/aulafy/meteo/blob/main/PRIVACY.md" target="_blank" rel="noreferrer">Consulta el tratamiento de datos</a>.</p>{!registered && <><label className="consent"><input required type="checkbox"/> Entiendo el alcance y acepto usar mi ubicación para calcular proximidad.</label><button className="primary" type="submit">Permitir notificaciones</button></>}{registered && <button className="primary" type="button" onClick={deactivateAlerts}>Desactivar y eliminar mi ubicación</button>}</form></div>}
-    {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="ai-dialog-title" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar explicación de seguridad" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2 id="ai-dialog-title">{hasSelectedLocation ? 'Focos más cercanos y seguridad' : 'Últimos focos detectados'}</h2>{aiLoading ? <p aria-live="polite">Analizando los datos visibles…</p> : <div className="ai-answer" role="region" aria-label="Respuesta del asistente" tabIndex={0}>{renderAiGuidance(aiGuidance)}</div>}<small>Groq · NASA FIRMS detecta anomalías térmicas, no confirma incendios. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
+    {showAi && <div className="modal-backdrop" onClick={() => setShowAi(false)}><section className="modal ai-modal" role="dialog" aria-modal="true" aria-labelledby="ai-dialog-title" onClick={(e)=>e.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar explicación de seguridad" onClick={()=>setShowAi(false)}><X/></button><div className="modal-icon"><Bot/></div><h2 id="ai-dialog-title">{hasSelectedLocation ? 'Focos más cercanos y seguridad' : 'Últimos focos detectados'}</h2>{aiLoading ? <p aria-live="polite">Analizando los datos visibles…</p> : <div className="ai-answer" role="region" aria-label="Respuesta del asistente" tabIndex={0}>{renderAiGuidance(aiGuidance)}</div>}<small>{aiSource} · NASA FIRMS detecta anomalías térmicas, no confirma incendios. No sustituye al 112, ES‑Alert ni a las autoridades.</small></section></div>}
     {showRouteImport && <div className="modal-backdrop" onClick={() => setShowRouteImport(false)}><section className="modal route-import-modal" role="dialog" aria-modal="true" aria-labelledby="route-dialog-title" onClick={(event)=>event.stopPropagation()}><button type="button" className="modal-x" aria-label="Cerrar importación de ruta" onClick={()=>setShowRouteImport(false)}><X/></button><div className="modal-icon"><Route/></div><h2 id="route-dialog-title">Cargar ruta de referencia</h2><p>Importa un GPX, KML o GeoJSON desde tu dispositivo. El archivo se procesa localmente y no modifica el nivel de riesgo ni tus alertas.</p><label className="consent"><input type="checkbox" checked={routeAcknowledged} onChange={(event)=>setRouteAcknowledged(event.target.checked)}/> Entiendo que METEO no ha verificado esta ruta y que no debo usarla como orden de evacuación.</label><label className={`route-file ${routeAcknowledged ? '' : 'disabled'}`}><Upload/> <span>{referenceRoute ? 'Sustituir ruta local' : 'Seleccionar GPX, KML o GeoJSON'}</span><input aria-label="Seleccionar archivo de ruta" disabled={!routeAcknowledged} type="file" accept=".gpx,.kml,.geojson,.json,application/geo+json,application/gpx+xml,application/vnd.google-earth.kml+xml" onChange={importReferenceRoute}/></label>{routeError && <p className="route-error" role="alert">{routeError}</p>}<small>Máximo 5 MB y 20.000 puntos. Solo rutas dentro de España.</small></section></div>}
   </div>;
 }
