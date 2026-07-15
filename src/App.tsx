@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl, { type GeoJSONSource, type Map as MapLibreMap } from 'maplibre-gl';
-import { Activity, AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Radio, Route, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
+import { Activity, AlertTriangle, Bell, Bot, ChevronRight, CloudRain, Download, ExternalLink, Flame, Layers, LocateFixed, MapPin, Menu, Pause, Play, Printer, Radio, Route, Ruler, Search, ShieldCheck, Thermometer, Trash2, Upload, UserRound, Wind, X } from 'lucide-react';
 import { SPAIN_CENTER } from './data';
 import { assessRisk, fireAgeLabel, getActionGuidance, getAirQuality, getHourlyForecast, getWeather, isActionableFire, parseFireFeed, parseTrafficFeed, rankFiresByDistance, rankTrafficByDistance, searchSpanishLocations, selectFiresForAi, trafficCauseLabel, trafficClosureLabel, windDirectionToCardinal } from './services';
 import { parseRouteText, sampleRoute, type ReferenceRoute } from './routes';
@@ -14,6 +14,7 @@ import { addCataloniaFireLayers, cataloniaFireFeatureCollection, setCataloniaFir
 import { selectOperationalCataloniaFires } from './features/cataloniaFires/selectors';
 import type { CataloniaFireIncident } from './features/cataloniaFires/types';
 import type { AirQuality, Coordinates, Fire, HourlyForecast, LocationResult, RiskAssessment, TrafficIncident, Weather } from './types';
+import { formatDistance, measurePath } from './measurements';
 
 const fallbackWeather: Weather = { available: false, temperature: 0, humidity: 0, windSpeed: 0, windDirection: 0, precipitation: 0, label: 'Cargando meteorología…' };
 const emptyFeatureCollection = { type: 'FeatureCollection' as const, features: [] };
@@ -116,6 +117,9 @@ export default function App() {
   const [routeElevation, setRouteElevation] = useState<ElevationProfile | null>(null);
   const [routeElevationLoading, setRouteElevationLoading] = useState(false);
   const [routeElevationError, setRouteElevationError] = useState('');
+  const [measurementEnabled, setMeasurementEnabled] = useState(false);
+  const [measurementPoints, setMeasurementPoints] = useState<Coordinates[]>([]);
+  const [measurementElevations, setMeasurementElevations] = useState<Array<number | null>>([]);
 
   const hasSelectedLocation = locationKind !== 'general';
   const hasPreciseLocation = locationKind === 'gps';
@@ -144,6 +148,7 @@ export default function App() {
   const earthquakeStatusText = earthquakeMode === 'loading' ? 'cargando…' : earthquakeMode === 'error' ? 'no disponible' : `hace ${earthquakeAgeMinutes < 1 ? '<1' : Math.floor(earthquakeAgeMinutes)} min`;
   const cataloniaFireAgeMinutes = cataloniaFireLastSync ? Math.max(0, (clock - cataloniaFireLastSync.getTime()) / 60_000) : Infinity;
   const cataloniaFireStatusText = cataloniaFireMode === 'loading' ? 'cargando…' : cataloniaFireMode === 'error' ? 'no disponible' : `hace ${cataloniaFireAgeMinutes < 1 ? '<1' : Math.floor(cataloniaFireAgeMinutes)} min`;
+  const measurement = useMemo(() => measurePath(measurementPoints, measurementElevations), [measurementPoints, measurementElevations]);
 
   useEffect(() => {
     let active = true;
@@ -290,6 +295,9 @@ export default function App() {
       map.addSource('reference-route', { type: 'geojson', data: emptyFeatureCollection });
       map.addSource('reference-route-trail', { type: 'geojson', data: emptyFeatureCollection });
       map.addSource('reference-route-marker', { type: 'geojson', data: emptyFeatureCollection });
+      map.addSource('map-measurement', { type: 'geojson', data: emptyFeatureCollection });
+      map.addLayer({ id: 'map-measurement-line', type: 'line', source: 'map-measurement', filter: ['==', '$type', 'LineString'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#176b50', 'line-width': 4, 'line-dasharray': [1.5, 1] } });
+      map.addLayer({ id: 'map-measurement-points', type: 'circle', source: 'map-measurement', filter: ['==', '$type', 'Point'], paint: { 'circle-radius': 6, 'circle-color': '#e7b84d', 'circle-stroke-width': 2, 'circle-stroke-color': '#263128' } });
       map.addLayer({ id: 'reference-route-line', type: 'line', source: 'reference-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#2563eb', 'line-width': 4, 'line-opacity': 0.72, 'line-dasharray': [2, 1] } });
       map.addLayer({ id: 'reference-route-trail-line', type: 'line', source: 'reference-route-trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#e7b84d', 'line-width': 5, 'line-opacity': 0.95 } });
       map.addSource('fires', { type: 'geojson', cluster: true, clusterMaxZoom: 10, clusterRadius: 45, data: { type: 'FeatureCollection', features: visibleFiresRef.current.map((f) => ({ type: 'Feature', properties: f, geometry: { type: 'Point', coordinates: f.coordinates } })) } });
@@ -354,6 +362,33 @@ export default function App() {
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const source = map.getSource('map-measurement') as GeoJSONSource | undefined;
+    source?.setData({
+      type: 'FeatureCollection',
+      features: [
+        ...(measurementPoints.length > 1 ? [{ type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: measurementPoints } }] : []),
+        ...measurementPoints.map((coordinates, index) => ({ type: 'Feature' as const, properties: { index }, geometry: { type: 'Point' as const, coordinates } })),
+      ],
+    });
+  }, [measurementPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !measurementEnabled) return;
+    map.getCanvas().style.cursor = 'crosshair';
+    const addPoint = (event: maplibregl.MapMouseEvent) => {
+      const point: Coordinates = [event.lngLat.lng, event.lngLat.lat];
+      const elevation = map.queryTerrainElevation?.(event.lngLat) ?? null;
+      setMeasurementPoints((points) => [...points, point]);
+      setMeasurementElevations((values) => [...values, elevation]);
+    };
+    map.on('click', addPoint);
+    return () => { map.off('click', addPoint); map.getCanvas().style.cursor = ''; };
+  }, [measurementEnabled]);
 
   useEffect(() => {
     visibleFiresRef.current = visibleFires;
@@ -629,6 +664,16 @@ export default function App() {
     setToast('GeoJSON generado localmente sin incluir tu ubicación precisa'); window.setTimeout(() => setToast(''), 3500);
   }
 
+  function clearMeasurement() {
+    setMeasurementPoints([]);
+    setMeasurementElevations([]);
+  }
+
+  function printSituationReport() {
+    setShowMapLayers(false);
+    window.setTimeout(() => window.print(), 50);
+  }
+
   async function explainRisk() {
     setShowAi(true); setAiLoading(true); setAiGuidance(''); setAiSource('METEO');
     try {
@@ -764,7 +809,8 @@ export default function App() {
         <div ref={mapContainer} className="map" />
         <div className="location-search"><div className="location-search-input"><Search size={17}/><input value={searchQuery} onChange={(event)=>setSearchQuery(event.target.value)} placeholder="Buscar municipio en España" aria-label="Buscar municipio en España"/>{searchQuery && <button onClick={()=>{setSearchQuery('');setSearchResults([])}} aria-label="Limpiar búsqueda"><X size={15}/></button>}</div>{(searching || searchResults.length > 0 || searchQuery.length >= 2) && <div className="location-results">{searching ? <p>Buscando…</p> : searchResults.length ? searchResults.map(result=><button key={`${result.name}-${result.coordinates.join('-')}`} onClick={()=>selectSearchedLocation(result)}><MapPin size={14}/><span><b>{result.name}</b><small>{result.region}, {result.country}</small></span></button>) : <p>Sin resultados en España</p>}</div>}</div>
         {weather.available && <div className="wind-compass"><span style={{transform:`rotate(${weather.windDirection + 180}deg)`}}>↑</span><div><small>DIRECCIÓN DEL VIENTO</small><b>{windDirectionToCardinal((weather.windDirection + 180) % 360)} · {weather.windSpeed.toFixed(0)} km/h</b><em>Indicador visual · no es una ruta</em></div></div>}
-        <div className="map-tools"><button className={showMapLayers ? 'active' : ''} aria-expanded={showMapLayers} onClick={() => setShowMapLayers((visible) => !visible)} title="Capas y análisis GeoLibre" aria-label="Capas y análisis GeoLibre"><Layers/></button><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
+        <div className="map-tools"><button className={showMapLayers ? 'active' : ''} aria-expanded={showMapLayers} onClick={() => setShowMapLayers((visible) => !visible)} title="Capas y análisis GeoLibre" aria-label="Capas y análisis GeoLibre"><Layers/></button><button className={measurementEnabled ? 'active' : ''} aria-pressed={measurementEnabled} onClick={() => setMeasurementEnabled((enabled) => !enabled)} title="Medir distancias" aria-label="Medir distancias"><Ruler/></button><button onClick={() => { setRouteError(''); setShowRouteImport(true); }} title="Cargar ruta local" aria-label="Cargar ruta local"><Route/></button><button onClick={locate} title="Usar mi ubicación" aria-label="Usar mi ubicación"><LocateFixed/></button><button onClick={() => mapRef.current?.zoomIn()} aria-label="Acercar mapa">+</button><button onClick={() => mapRef.current?.zoomOut()} aria-label="Alejar mapa">−</button></div>
+        {measurementEnabled && <section className="measurement-card" aria-live="polite"><div><Ruler/><span><b>Medición visual</b><small>{measurementPoints.length < 2 ? 'Pulsa dos o más puntos en el mapa' : `${formatDistance(measurement.planarMeters)} geodésicos`}</small></span></div>{measurement.surfaceMeters != null && <small>Sobre relieve: {formatDistance(measurement.surfaceMeters)} · ↑ {Math.round(measurement.ascentMeters ?? 0)} m · ↓ {Math.round(measurement.descentMeters ?? 0)} m</small>}<p>No es una distancia de evacuación ni confirma que una vía sea transitable.</p><button type="button" disabled={!measurementPoints.length} onClick={clearMeasurement}>Borrar medición</button></section>}
         {showMapLayers && <section className="map-layer-panel" aria-label="Capas y análisis del mapa">
           <div className="map-layer-heading"><div><b>Capas y análisis</b><small>GeoLibre · MapLibre · fuentes oficiales</small></div><button onClick={() => setShowMapLayers(false)} aria-label="Cerrar capas"><X/></button></div>
           <label className="map-layer-switch"><span><b>Relieve 3D</b><small>Elevación JAXA · contexto topográfico</small></span><input type="checkbox" checked={terrainEnabled} onChange={(event) => setTerrainEnabled(event.target.checked)}/></label>
@@ -780,8 +826,10 @@ export default function App() {
           <label className="fire-time-control"><span><b>Ventana de detecciones</b><small>Solo modifica lo que se ve en el mapa</small></span><select value={fireTimeWindow} onChange={(event) => setFireTimeWindow(Number(event.target.value) as FireTimeWindow)}>{FIRE_TIME_WINDOWS.map((hours) => <option key={hours} value={hours}>Últimas {hours} h</option>)}</select></label>
           <div className="visible-layer-count"><Flame/> {visibleFires.length} de {fires.length} FIRMS · {operationalCataloniaFires.length} Bombers CAT · {trafficIncidents.length} DGT{earthquakeLayerEnabled ? ` · ${earthquakes.length} sismos USGS` : ''}</div>
           <button className="map-export" onClick={exportVisibleAnalysis}><Download/> Exportar GeoJSON visible</button>
+          <button className="map-export" onClick={printSituationReport}><Printer/> Imprimir parte de situación</button>
           <p>FIRMS, Bombers, EFFIS, DGT y USGS son fuentes independientes. Una actuación de Bombers no es un perímetro; un terremoto no implica una alerta de tsunami. Ninguna capa genera una orden o ruta de evacuación.</p>
         </section>}
+        <section className="print-report" aria-hidden="true"><h1>METEO · Parte de situación</h1><p>Generado {new Date(clock).toLocaleString('es-ES')} · Zona consultada: {hasSelectedLocation ? locationLabel : 'España (sin ubicación compartida)'}</p><div><b>NASA FIRMS</b><span>{visibleFires.length} detecciones térmicas visibles · ventana {fireTimeWindow} h</span></div><div><b>Bombers Catalunya</b><span>{operationalCataloniaFires.length} actuaciones de vegetación no extinguidas recibidas</span></div><div><b>DGT</b><span>{trafficMode === 'live' ? `${trafficIncidents.length} incidencias recibidas` : 'Fuente no disponible'}</span></div><div><b>Contexto</b><span>Viento {weather.available ? `${weather.windSpeed.toFixed(0)} km/h · humedad ${weather.humidity.toFixed(0)}% · ${weather.temperature.toFixed(0)} °C` : 'no disponible'}</span></div><strong>Documento informativo, no orden oficial</strong><small>FIRMS son anomalías térmicas, no incendios confirmados. Las actuaciones de Bombers no son perímetros. METEO no certifica rutas ni carreteras abiertas. Sigue ES-Alert, 112 y las autoridades.</small></section>
         <div className="map-meta"><span><i className="fire-dot"/> FIRMS {visibleFires.length}/{fires.length} · {fireTimeWindow} h</span>{cataloniaFireLayerEnabled && <span><i className="catalonia-fire-dot"/> Bombers CAT {operationalCataloniaFires.length}</span>}<span><i className="traffic-dot"/> DGT {trafficMode === 'live' ? trafficIncidents.length : '—'}</span>{earthquakeLayerEnabled && <span><i className="earthquake-dot"/> USGS {earthquakes.length} · 24 h</span>}{effisFwiEnabled && <span><i className="effis-fwi-dot"/> EFFIS FWI</span>}{effisBurnedEnabled && <span><i className="effis-burned-dot"/> EFFIS quemado</span>}<span><i className="safe-dot"/> {hasSelectedLocation ? locationLabel : 'Punto de consulta'}</span>{referenceRoute && <span><i className="route-line"/> Ruta local no verificada</span>}</div>
         {referenceRoute && <section className="route-animation" aria-label="Animación de ruta local">
           <div className="route-animation-title"><div><b>{referenceRoute.name}</b><small>{referenceRoute.format} · {(referenceRoute.totalMeters / 1000).toFixed(1)} km · solo referencia</small></div><button onClick={clearReferenceRoute} aria-label="Eliminar ruta local"><Trash2/></button></div>

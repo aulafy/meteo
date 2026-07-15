@@ -22,6 +22,8 @@ METEO reproduce sobre su instancia MapLibre los patrones de GeoLibre que sí ayu
 | Elevation profile | Hasta 100 muestras de la ruta con Open‑Meteo | Se consulta únicamente tras una acción explícita |
 | Route animation | Flecha, rastro, progreso, velocidad y seguimiento | Ruta local no verificada |
 | Exportación | GeoJSON de detecciones visibles y ruta local | Excluye la ubicación precisa del usuario |
+| Medición geodésica y sobre terreno | Distancia por puntos, con desnivel cuando el DEM está disponible | Medición visual; no representa una ruta transitable ni una distancia de evacuación |
+| Parte imprimible | Resumen local con fecha, fuentes, capas y advertencias | No incluye coordenadas GPS ni sustituye un parte oficial |
 | View state y controles | Escala métrica, pantalla completa, pitch y brújula | Ayudas cartográficas, no información oficial |
 | Dirección del viento | Segmento desde la ubicación hacia sotavento | No es un cono ni una predicción de avance del fuego |
 
@@ -31,6 +33,7 @@ Referencias oficiales:
 - [Control de terreno de GeoLibre](https://github.com/opengeos/GeoLibre/blob/main/packages/map/src/terrain-control.ts)
 - [Time Slider de GeoLibre](https://github.com/opengeos/GeoLibre/blob/main/packages/plugins/src/plugins/maplibre-time-slider.ts)
 - [Perfil de elevación de GeoLibre](https://github.com/opengeos/GeoLibre/tree/main/packages/plugins/src/plugins/elevation-profile)
+- [Medición 3D de GeoLibre](https://github.com/opengeos/GeoLibre/blob/main/packages/plugins/src/plugins/terrain-measure.ts)
 - [Terreno 3D en MapLibre](https://maplibre.org/maplibre-gl-js/docs/examples/3d-terrain/)
 - [Elevation API de Open‑Meteo](https://open-meteo.com/en/docs/elevation-api)
 
