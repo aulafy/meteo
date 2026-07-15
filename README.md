@@ -32,6 +32,15 @@ Antes de modificar o publicar:
 npm run check
 ```
 
+Los recorridos de navegador se ejecutan aparte porque instalan Chromium y levantan
+un servidor aislado. Simulan las fuentes externas para comprobar interfaz móvil y
+escritorio, medición, capas, importación y caída de FIRMS de forma reproducible:
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
 ## Datos
 
 - Meteorología actual, pronóstico horario y calidad del aire: Open-Meteo.
@@ -44,7 +53,7 @@ npm run check
 
 El mapa conserva las detecciones del feed como contexto, pero el riesgo personal y las notificaciones solo consideran observaciones de confianza igual o superior al 70% y con una antigüedad máxima de 12 horas. La consulta y el filtro geográfico cubren península, Baleares, Canarias, Ceuta y Melilla. Si falla la meteorología, la interfaz muestra el dato como no disponible y el motor no sustituye esos valores por cifras simuladas.
 
-Si falla temporalmente una fuente pública, el navegador puede recuperar de IndexedDB la última respuesta que ya hubiera validado: FIRMS hasta 24 horas, DGT hasta 2 horas, Bombers Catalunya hasta 12 horas y USGS hasta 48 horas. La interfaz la marca como «copia local», conserva la antigüedad de la fuente y no permite que FIRMS en caché active notificaciones o consultas a la IA. No se guardan en esa caché GPS, búsquedas, meteorología ligada a coordenadas, suscripciones ni respuestas de Groq.
+Si falla temporalmente una fuente pública, el navegador puede recuperar de IndexedDB la última respuesta que ya hubiera validado: FIRMS hasta 24 horas, DGT hasta 2 horas, Bombers Catalunya hasta 12 horas y USGS hasta 48 horas. La interfaz la marca como «copia local», conserva la antigüedad de la fuente y no permite que FIRMS en caché active notificaciones o consultas a la IA. El service worker no intercepta ni recategoriza estos feeds; conserva únicamente el shell instalable. No se guardan en esa caché GPS, búsquedas, meteorología ligada a coordenadas, suscripciones ni respuestas de Groq.
 
 Las actuaciones de Bombers no se convierten automáticamente en detecciones FIRMS ni modifican todavía el índice o las notificaciones: el servicio oficial publica ubicación operativa, fase y dotaciones, pero no una intensidad térmica, un perímetro ni una orden de evacuación. Las actuaciones sin fase solo se muestran durante 24 horas desde su última actualización y se rotulan como «Fase no publicada».
 
@@ -54,7 +63,7 @@ METEO reutiliza de [aulafy/meteoflow](https://github.com/aulafy/meteoflow), ambo
 
 ## Rutas locales y GeoLibre
 
-La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
+La herramienta de ruta del mapa acepta GPX, KML y GeoJSON y reproduce el patrón de animación de GeoLibre: flecha orientada, rastro, progreso, velocidad visual y seguimiento opcional. Los archivos se procesan localmente y nunca se presentan como evacuación segura. El conversor GPX/KML se descarga solo tras seleccionar un archivo, no durante la apertura normal. Consulta el [análisis técnico](docs/route-animation.md) y el [notebook experto](notebooks/geolibre-route-animation.ipynb).
 
 El panel «Capas y análisis» incorpora otros patrones útiles de GeoLibre: relieve 3D, hillshade, imagen satelital contextual, ventanas temporales FIRMS, dirección del viento, perfil de elevación bajo consentimiento, medición geodésica/3D, comparación por transparencia, exportación GeoJSON y un parte A4 sin el GPS del residente. Las mediciones son visuales: no representan una ruta de evacuación ni certifican una vía transitable. La comparación tampoco implica que las capas compartan fecha o resolución. La [auditoría de integración](docs/geolibre-integration.md) explica qué se reutiliza, qué se descarta y por qué.
 

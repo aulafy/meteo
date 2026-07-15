@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOMParser } from '@xmldom/xmldom';
-import { parseRouteText, sampleRoute } from './routes';
+import { parseRouteText } from './route-importer';
+import { sampleRoute } from './routes';
 
 globalThis.DOMParser = DOMParser as unknown as typeof globalThis.DOMParser;
 

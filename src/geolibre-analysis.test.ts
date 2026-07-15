@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { buildWindIndicator, destinationPoint, fetchRouteElevation, filterFiresByWindow } from './geolibre-analysis';
-import { parseRouteText } from './routes';
+import { parseRouteText } from './route-importer';
 import type { Fire } from './types';
 
 const fire: Fire = { id: '1', coordinates: [-3.7, 40.4], name: 'Foco', confidence: 90, intensity: 70, detectedAt: '2026-07-14T10:00:00Z', source: 'NASA FIRMS' };
