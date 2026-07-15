@@ -34,4 +34,4 @@ Los archivos GPX, KML y GeoJSON se procesan localmente. Solo si la persona solic
 
 ## Datos locales
 
-El navegador conserva indicadores de activación de avisos y el endpoint push para poder solicitar su eliminación. METEO no incorpora actualmente analítica publicitaria ni seguimiento comercial.
+El navegador conserva indicadores de activación de avisos y el endpoint push para poder solicitar su eliminación. También puede conservar en IndexedDB la última respuesta pública ya validada de FIRMS, DGT, Bombers Catalunya y USGS para mostrarla, con advertencia y antigüedad, durante una ausencia temporal de red. Esta caché no incluye GPS, municipios buscados, meteorología ligada a coordenadas, rutas importadas, suscripciones ni respuestas de IA; deja de utilizarse al superar la caducidad de cada fuente y puede eliminarse borrando los datos del sitio en el navegador. METEO no incorpora actualmente analítica publicitaria ni seguimiento comercial.

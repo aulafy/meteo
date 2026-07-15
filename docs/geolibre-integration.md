@@ -25,6 +25,7 @@ METEO reproduce sobre su instancia MapLibre los patrones de GeoLibre que sí ayu
 | Medición geodésica y sobre terreno | Distancia por puntos, con desnivel cuando el DEM está disponible | Medición visual; no representa una ruta transitable ni una distancia de evacuación |
 | Parte imprimible | Resumen local con fecha, fuentes, capas y advertencias | No incluye coordenadas GPS ni sustituye un parte oficial |
 | Comparación de capas | Transparencia independiente para imagen Esri, FWI y áreas quemadas EFFIS | Comparación visual; las capas no comparten fecha ni resolución |
+| Resiliencia local | Última respuesta pública validada en IndexedDB, con caducidad por fuente | No almacena GPS y se rotula siempre como copia, nunca como dato en vivo |
 | View state y controles | Escala métrica, pantalla completa, pitch y brújula | Ayudas cartográficas, no información oficial |
 | Dirección del viento | Segmento desde la ubicación hacia sotavento | No es un cono ni una predicción de avance del fuego |
 
@@ -48,4 +49,4 @@ Referencias oficiales:
 
 ## Privacidad y seguridad
 
-La importación GPX/KML/GeoJSON sigue siendo local. Solo al pulsar «Calcular perfil de elevación» se envían a Open‑Meteo hasta 100 coordenadas muestreadas de la ruta. La exportación GeoJSON se genera en el navegador y declara que no contiene la ubicación precisa del usuario.
+La importación GPX/KML/GeoJSON sigue siendo local. Solo al pulsar «Calcular perfil de elevación» se envían a Open‑Meteo hasta 100 coordenadas muestreadas de la ruta. La exportación GeoJSON se genera en el navegador y declara que no contiene la ubicación precisa del usuario. La caché de resiliencia contiene exclusivamente respuestas públicas de FIRMS, DGT, Bombers y USGS; no contiene ubicación, consultas ni datos de cuenta.

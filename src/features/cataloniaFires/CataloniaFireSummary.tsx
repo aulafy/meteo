@@ -2,11 +2,12 @@ import { ChevronRight, ExternalLink, Siren } from 'lucide-react';
 import type { Coordinates } from '../../types';
 import { cataloniaFireKindLabel, cataloniaFirePhaseLabel, cataloniaFireResourcesLabel, selectCataloniaFiresForSummary } from './selectors';
 import type { CataloniaFireIncident } from './types';
+import type { PublicDataMode } from '../../public-data-resilience';
 
 interface CataloniaFireSummaryProps {
   incidents: CataloniaFireIncident[];
   location: Coordinates | null;
-  mode: 'loading' | 'live' | 'error';
+  mode: PublicDataMode;
   statusText: string;
   now: number;
   onSelect: (incident: CataloniaFireIncident) => void;
@@ -21,7 +22,8 @@ export function CataloniaFireSummary({ incidents, location, mode, statusText, no
     <div className="section-title"><div><h2>Actuaciones en Cataluña</h2><span>Bombers Generalitat · {statusText}</span></div><button type="button" onClick={onShowLayer}>Ver capa</button></div>
     {mode === 'loading' && incidents.length === 0 && <p className="route-copy">Cargando actuaciones oficiales de vegetación…</p>}
     {mode === 'error' && incidents.length === 0 && <p className="route-copy">Bombers no está disponible. Consulta el visor oficial y el 112.</p>}
-    {mode === 'live' && items.length === 0 && <p className="route-copy">Sin actuaciones operativas publicadas en esta consulta.</p>}
+    {mode === 'cache' && <p className="source-cache-warning">Copia local: puede haber actuaciones nuevas, cambios de fase o retiradas que aún no aparecen.</p>}
+    {(mode === 'live' || mode === 'cache') && items.length === 0 && <p className="route-copy">Sin actuaciones operativas en la copia disponible.</p>}
     <div className="catalonia-fire-list">
       {items.map(({ incident, distanceKm }) => <article className="catalonia-fire-row" key={incident.id}>
         <button type="button" onClick={() => onSelect(incident)} aria-label={`Ver actuación de Bombers en ${incident.municipality}`}>
