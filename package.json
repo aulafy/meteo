@@ -19,7 +19,7 @@
     "check": "npm test && npm run tutorial:verify && npm run build"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.110.3",
+    "@supabase/supabase-js": "^2.110.7",
     "@tmcw/togeojson": "^7.1.2",
     "@turf/bearing": "^7.2.0",
     "@turf/boolean-point-in-polygon": "^7.3.5",
