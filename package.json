@@ -43,7 +43,7 @@
     "@types/topojson-client": "^3.1.5",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^4.3.4",
-    "@xmldom/xmldom": "^0.9.10",
+    "@xmldom/xmldom": "^0.9.12",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
     "vitest": "^4.1.10"
