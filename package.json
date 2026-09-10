@@ -46,6 +46,6 @@
     "@xmldom/xmldom": "^0.9.10",
     "typescript": "^5.7.3",
     "vite": "^6.0.7",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
